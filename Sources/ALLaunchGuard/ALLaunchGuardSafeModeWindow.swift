@@ -84,7 +84,10 @@ internal final class ALLaunchGuardSafeModeWindowCoordinator {
     /// - Parameter rootViewController: 安全模式页（作为窗口 rootViewController）。
     /// - Precondition: 主线程调用（UIKit 状态访问；公共入口已派发主队列）。
     func install(rootViewController: UIViewController) {
-        dispatchPrecondition(condition: .onQueue(.main))
+        // 与 start()/reset() 同策略：Debug 断言暴露误用、Release 容忍
+        //（防闪退库不在宿主误用时于 Release 崩溃）。公共入口
+        // activateSafeModeWindow 已保证主线程派发，此断言防御未来新增调用点。
+        assert(Thread.isMainThread, "安全模式窗口安装必须在主线程执行")
 
         // 幂等门控：窗口已挂载（window != nil），或安装已发起、正等待
         // scene 连接/超时（pendingRootViewController != nil）——均直接返回，

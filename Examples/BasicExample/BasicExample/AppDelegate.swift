@@ -39,7 +39,9 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         //    安全模式启动时，以下代码不会执行——
         //    这正是首页"启动任务清单"在安全模式下为空/不展示的原因。
         let window = UIWindow(frame: UIScreen.main.bounds)
-        window.rootViewController = HomeViewController()
+        // 包一层 UINavigationController：HomeViewController 的“直接进入
+        // 安全模式”DEBUG 入口配置在 navigationItem 上，需导航栏承载才可见。
+        window.rootViewController = UINavigationController(rootViewController: HomeViewController())
         window.makeKeyAndVisible()
         self.window = window
 
