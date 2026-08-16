@@ -103,7 +103,6 @@ public final class ALLaunchGuard {
     /// visible and all critical setup is complete).
     public func markLaunchSuccessful() {
         storage.consecutiveCrashCount = 0
-        isInSafeMode = false
     }
 
     /// Resets safe mode and clears the crash counter.
