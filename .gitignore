@@ -4,6 +4,18 @@
 
 ## User settings
 xcuserdata/
+*.xcuserdatad/
+
+## Build artifacts
+DerivedData/
+build/
+.DS_Store
+
+## SwiftPM workspace state（仓库根与 Example 工程均可能生成）
+.swiftpm/
+
+## MPLaunch 集成示例：本地专属（依赖内部私有库 ../mplaunch），整目录不入库
+Examples/MPLaunchExample/
 
 ## Obj-C/Swift specific
 *.hmap
