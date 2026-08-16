@@ -96,9 +96,6 @@ public typealias ALColor = ALPlaceholderColor
 
 public final class ALPlaceholderColor {
     public static let systemOrange = ALPlaceholderColor()
-    public static let label       = ALPlaceholderColor()
-    public static let secondaryLabel = ALPlaceholderColor()
-    public static let systemBackground = ALPlaceholderColor()
     public init() {}
 }
 #endif

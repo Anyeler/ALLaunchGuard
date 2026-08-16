@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 // MARK: - 修复动作协议
 
@@ -186,5 +191,202 @@ public final class ALLaunchGuardClearCacheAction: ALLaunchGuardFixAction {
                 completion(false)
             }
         }
+    }
+}
+
+// MARK: - 内置重启动作
+
+/// 内置重启动作：一键终止进程交由用户下次冷启动恢复（破坏性样式）。
+///
+/// 时序设计（design D1，load-bearing）：`perform` 先同步回调
+/// `completion(true)`——编排层收到成功后将 `reset()`（清零计数、
+/// 清除粘滞标记）派发主队列；随后本动作才把 `exitHandler`（默认
+/// `exit(0)`）派发主队列晚一拍执行。依赖主队列 FIFO 保证粘滞标记
+/// 清除先于进程终止，避免重启后再次进入安全模式。
+///
+/// 菜单位置由宿主注册顺序决定（约定置于末位），库不自动排序或注入；
+/// 与菜单页既有重启按钮（成功后呈现、Alert 二次确认）可并存，
+/// 宿主二选一或同用均可。
+public final class ALLaunchGuardRestartAction: ALLaunchGuardFixAction {
+
+    /// 默认中文标题
+    public let title: String
+
+    /// 默认 SF Symbol 图标名
+    public let iconSystemName: String?
+
+    /// 破坏性样式标记：重启属破坏性退出路径，恒定 true
+    public let isDestructive: Bool
+
+    /// 进程终止行为（默认 `exit(0)`）：测试可注入替换（非公共 API，
+    /// `@testable` 可见），生产语义不可经公共 API 更改。
+    internal var exitHandler: () -> Void = { exit(0) }
+
+    /// - Parameters:
+    ///   - title: 菜单标题（默认“重启应用”）
+    ///   - iconSystemName: SF Symbol 图标名（默认 arrow.clockwise）
+    public init(
+        title: String = "重启应用",
+        iconSystemName: String? = "arrow.clockwise"
+    ) {
+        self.title = title
+        self.iconSystemName = iconSystemName
+        self.isDestructive = true
+    }
+
+    public func perform(completion: @escaping (Bool) -> Void) {
+        // 第一步：先回调成功，编排层的 reset 由此先入主队列。
+        completion(true)
+        // 第二步：主队列晚一拍终止进程。load-bearing——与上一行的
+        // 先后顺序不得调换：依赖主队列 FIFO 保证编排层的
+        // DispatchQueue.main.async { reset() … } 先执行（粘滞标记
+        // 清除先于进程终止），否则重启后仍会因粘滞标记再进安全模式。
+        DispatchQueue.main.async { self.exitHandler() }
+    }
+}
+
+// MARK: - 内置白名单缓存全清动作
+
+/// 内置白名单缓存全清动作：深档位清理（design D2），与
+/// `ALLaunchGuardClearCacheAction`（仅 Caches 的轻档位）共存，
+/// 宿主按需注册其一或同用。
+///
+/// 清理模型（枚举沙盒根顶层目录，默认 `NSHomeDirectory()`）：
+/// - 保护名单内（默认 Documents/Library/SystemData，可扩展）：不删
+///   目录本身；Library 特判——进入清理其 Caches 子目录内容；
+/// - tmp / .Trash：清空内容（目录本身保留）；
+/// - 其余游离顶层项：整个删除。
+///
+/// 幂等与失败聚合：条目已消失按成功处理；单项删除失败继续清理其余
+/// 项，最终聚合 `completion(false)`（安全模式保持激活，用户可重试）。
+/// 在后台低优先级队列（`qos: .utility`）执行，逐项 autoreleasepool。
+public final class ALLaunchGuardClearAllCacheAction: ALLaunchGuardFixAction {
+
+    /// 默认保护顶层目录名单（保守：用户数据、系统数据与 Library
+    /// 非缓存部分），宿主可经构造参数扩展或调整。
+    public static let defaultProtectedTopLevelItems = ["Documents", "Library", "SystemData"]
+
+    /// 默认中文标题（与 ClearCacheAction 的“清理缓存”区分档位）
+    public let title: String
+
+    /// 默认 SF Symbol 图标名
+    public let iconSystemName: String?
+
+    /// 破坏性样式标记：全清属高风险操作，恒定 true
+    public let isDestructive: Bool
+
+    /// 沙盒根目录（默认应用沙盒；测试可注入任意目录模拟）
+    private let sandboxRoot: URL
+
+    /// 保护顶层目录名单
+    private let protectedTopLevelItems: [String]
+
+    /// 默认构造：清理应用沙盒。
+    ///
+    /// - Parameters:
+    ///   - title: 菜单标题（默认“深度清理缓存”）
+    ///   - iconSystemName: SF Symbol 图标名（默认 trash.slash）
+    ///   - protectedTopLevelItems: 保护顶层目录名单（默认
+    ///     Documents/Library/SystemData），可追加宿主自建目录
+    public init(
+        title: String = "深度清理缓存",
+        iconSystemName: String? = "trash.slash",
+        protectedTopLevelItems: [String] = ALLaunchGuardClearAllCacheAction.defaultProtectedTopLevelItems
+    ) {
+        self.title = title
+        self.iconSystemName = iconSystemName
+        self.isDestructive = true
+        self.sandboxRoot = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+        self.protectedTopLevelItems = protectedTopLevelItems
+    }
+
+    /// 测试注入构造：以指定目录模拟沙盒根（非公共 API，`@testable` 可见）。
+    init(
+        sandboxRoot: URL,
+        title: String = "深度清理缓存",
+        iconSystemName: String? = "trash.slash",
+        protectedTopLevelItems: [String] = ALLaunchGuardClearAllCacheAction.defaultProtectedTopLevelItems
+    ) {
+        self.title = title
+        self.iconSystemName = iconSystemName
+        self.isDestructive = true
+        self.sandboxRoot = sandboxRoot
+        self.protectedTopLevelItems = protectedTopLevelItems
+    }
+
+    public func perform(completion: @escaping (Bool) -> Void) {
+        // 全清为耗时 IO：后台低优先级队列执行，逐项 autoreleasepool
+        DispatchQueue.global(qos: .utility).async { [sandboxRoot, protectedTopLevelItems] in
+            let fileManager = FileManager.default
+            // 沙盒根不存在：幂等成功（与 ClearCacheAction 语义一致）
+            guard fileManager.fileExists(atPath: sandboxRoot.path) else {
+                completion(true)
+                return
+            }
+            guard let entries = try? fileManager.contentsOfDirectory(atPath: sandboxRoot.path) else {
+                // 列举失败（非常罕见，如权限异常）：如实报失败供重试
+                completion(false)
+                return
+            }
+
+            var failed = false
+            for entry in entries {
+                autoreleasepool {
+                    // 白名单在删除循环内逐条评估（不预过滤快照）：
+                    // 判定以删除时刻为准，TOCTOU 安全（design D2）。
+                    if protectedTopLevelItems.contains(entry) {
+                        if entry == "Library" {
+                            // Library 特判：保留目录本身，仅清理 Caches 子目录内容
+                            let caches = sandboxRoot.appendingPathComponent("Library/Caches", isDirectory: true)
+                            if !Self.clearContents(of: caches, fileManager: fileManager) {
+                                failed = true
+                            }
+                        }
+                        // 保护名单内其余目录：整体保留
+                        return
+                    }
+
+                    let url = sandboxRoot.appendingPathComponent(entry)
+                    if entry == "tmp" || entry == ".Trash" {
+                        // 临时/回收站目录：清空内容，目录本身保留
+                        if !Self.clearContents(of: url, fileManager: fileManager) {
+                            failed = true
+                        }
+                        return
+                    }
+
+                    // 其余游离顶层项：整个删除；条目已消失按成功（幂等）
+                    guard fileManager.fileExists(atPath: url.path) else { return }
+                    do {
+                        try fileManager.removeItem(at: url)
+                    } catch {
+                        // 单项失败记录后继续清理其余项，最终聚合失败
+                        failed = true
+                    }
+                }
+            }
+            completion(!failed)
+        }
+    }
+
+    /// 清空目录内容（目录本身保留）；目录不存在按成功。返回是否全部成功。
+    private static func clearContents(of directory: URL, fileManager: FileManager) -> Bool {
+        guard fileManager.fileExists(atPath: directory.path) else { return true }
+        guard let children = try? fileManager.contentsOfDirectory(atPath: directory.path) else {
+            return false
+        }
+        var allSucceeded = true
+        for child in children {
+            let childURL = directory.appendingPathComponent(child)
+            // 条目已消失按成功（幂等）
+            guard fileManager.fileExists(atPath: childURL.path) else { continue }
+            do {
+                try fileManager.removeItem(at: childURL)
+            } catch {
+                // 单项失败记录后继续清理其余项
+                allSucceeded = false
+            }
+        }
+        return allSucceeded
     }
 }

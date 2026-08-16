@@ -14,9 +14,13 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         //
         // 1. 注册修复动作：必须在 start() 之前完成（安全模式菜单的数据源）。
         //    内置动作与自定义动作可混排，注册顺序即菜单展示顺序。
+        //    约定：重启动作（RestartAction）注册在末位——破坏性退出路径
+        //    置底呈现（红色警示样式），库不自动排序（见 README 末位约定）。
         ALLaunchGuard.shared.fixActions = [
-            ALLaunchGuardClearCacheAction(),   // 内置：清理沙盒 Caches 目录
-            ClearDemoDataAction()              // 自定义：清理沙盒 Documents/DemoData 目录
+            ALLaunchGuardClearCacheAction(),      // 内置：清理沙盒 Caches 目录（轻档位）
+            ALLaunchGuardClearAllCacheAction(),   // 内置：白名单式沙盒深度清理（深档位）
+            ClearDemoDataAction(),                // 自定义：清理沙盒 Documents/DemoData 目录
+            ALLaunchGuardRestartAction()          // 内置：重启应用（末位约定）
         ]
 
         // 2. 安全模式门控：返回 true 表示本次启动处于安全模式，

@@ -24,33 +24,55 @@ public final class ALLaunchGuard {
     public static let shared = ALLaunchGuard()
 
     /// Returns `true` when the guard has activated safe mode.
-    public private(set) var isInSafeMode: Bool = false
+    ///
+    /// 对外只读（fix-pr3-review-comments：移除公开 setter，恢复 2.0 的
+    /// 只读 API 面，外部不得篡改安全模式状态）；内部经 `_isInSafeMode`
+    /// 在 `stateLock` 内更新（activateSafeMode 置位 / reset 清零）。
+    /// 任意线程可读（harden-thread-safety：读路径经 `stateLock` 串行化）。
+    public var isInSafeMode: Bool {
+        get { withStateLock { _isInSafeMode } }
+    }
 
     /// Number of consecutive crash-on-launch events before safe mode activates.
-    /// Defaults to `3`.
-    public var crashThreshold: Int
+    /// Defaults to `3`. 存取经 `stateLock` 串行化。
+    public var crashThreshold: Int {
+        get { withStateLock { _crashThreshold } }
+        set { withStateLock { _crashThreshold = newValue } }
+    }
 
     /// 存活确认时长（秒）：启动后进程存活满该时长即视为一次正常启动，
     /// 计数自动清零，不再依赖宿主手动调用 `markLaunchSuccessful()`。
-    /// Defaults to `5`.
-    public var survivalTimeout: TimeInterval = 5
+    /// Defaults to `5`. 存取经 `stateLock` 串行化。
+    public var survivalTimeout: TimeInterval {
+        get { withStateLock { _survivalTimeout } }
+        set { withStateLock { _survivalTimeout = newValue } }
+    }
 
     /// 极早期无副作用查询：读取粘滞安全模式标记或计数与阈值的关系。
     ///
     /// 可在 `start()` 之前（宿主启动最早期）调用，不改变任何存储状态。
+    /// 任意线程可读（harden-thread-safety：经 `stateLock` 串行化，并发写
+    /// 下不读到撕裂状态）。
     public var shouldEnterSafeMode: Bool {
-        storage.safeModeActive || storage.consecutiveCrashCount >= crashThreshold
+        withStateLock {
+            storage.safeModeActive || storage.consecutiveCrashCount >= _crashThreshold
+        }
     }
 
     /// Delegate to receive safe-mode lifecycle events.
-    public weak var delegate: ALLaunchGuardDelegate?
+    /// 存取经 `stateLock` 串行化。
+    public var delegate: ALLaunchGuardDelegate? {
+        get { withStateLock { _delegate } }
+        set { withStateLock { _delegate = newValue } }
+    }
 
     /// Configuration for the built-in safe-mode UI.
     ///
     /// Assign before calling `start()` when using `autoPresent = true`.
+    /// 存取经 `stateLock` 串行化。
     public var uiConfig: ALLaunchGuardConfig {
-        get { _uiConfig }
-        set { _uiConfig = newValue }
+        get { withStateLock { _uiConfig } }
+        set { withStateLock { _uiConfig = newValue } }
     }
 
     /// 已注册的修复动作（安全模式菜单项数据源）。
@@ -61,7 +83,37 @@ public final class ALLaunchGuard {
     ///（通过 `perform(_:completion:)`）。
     ///
     /// 动作会被强持有（生命周期与本单例同长），实现方应轻持有依赖。
-    public var fixActions: [ALLaunchGuardFixAction] = []
+    /// 存取经 `stateLock` 串行化。
+    public var fixActions: [ALLaunchGuardFixAction] {
+        get { withStateLock { _fixActions } }
+        set { withStateLock { _fixActions = newValue } }
+    }
+
+    /// 安全模式最小启动任务：进入安全模式时同步按序执行。
+    ///
+    /// 安全模式激活时（阈值触发 / 粘滞触发 / 调试直入，任一路径），库在
+    /// `isInSafeMode` 置位后、委托回调 `launchGuardDidEnterSafeMode` 与安全
+    /// 模式 UI 安装**之前**，按注册顺序同步执行全部任务，保证最小模块
+    /// （如日志上报 SDK）在修复页呈现前就绪。每个进程生命周期内仅执行
+    /// 一次（同进程内重复激活不重复执行；进程重启即新实例，会再次执行）。
+    /// 任务内可安全读取 `isInSafeMode`（已置位）。
+    ///
+    /// 任务约束（宿主必须遵守，库不做运行时防护）：
+    /// - 自包含：不得依赖宿主正常启动图中的模块（安全模式下正常启动图
+    ///   被整体跳过）；
+    /// - 轻量同步：在安全模式首帧前的主线程执行，重量级任务会拖慢
+    ///   修复页呈现，且任务崩溃会导致安全模式页无法呈现（由粘滞标记
+    ///   兜底：下次启动仍进安全模式）；
+    /// - 不做磁盘 IO；
+    /// - 禁止触碰启动编排器内部状态。使用启动编排器的宿主可在闭包内
+    ///   桥接编排器的最小任务执行能力——本库不依赖、不引用任何启动
+    ///   编排器。
+    ///
+    /// 默认空数组：行为与未引入本能力时完全一致。存取经 `stateLock` 串行化。
+    public var safeModeLaunchTasks: [() -> Void] {
+        get { withStateLock { _safeModeLaunchTasks } }
+        set { withStateLock { _safeModeLaunchTasks = newValue } }
+    }
 
     // MARK: - Internal（测试注入）
 
@@ -74,7 +126,33 @@ public final class ALLaunchGuard {
     // MARK: - Private
 
     private let storage: ALLaunchGuardStorage
+
+    /// 核心状态串行化锁（harden-thread-safety，design D1）：保护全部自身
+    /// 可变状态与锁内的 storage 读写，使任意线程读路径（shouldEnterSafeMode /
+    /// isInSafeMode）在并发写下不读到撕裂或中间状态。负载为启动期个位数次
+    /// 微秒级临界区，故选 NSLock（非递归）而非读写锁 / Actor。
+    ///
+    /// 纪律红线（防重入死锁）：锁内 MUST NOT 触达宿主代码——delegate 回调、
+    /// safeModeLaunchTasks 执行、窗口安装 / present、action.perform 与
+    /// completion 派发一律锁外执行；锁内只算决策快照，解锁后再执行副作用。
+    /// 锁内如需读写受保护状态，直接访问下方 `_` 前缀私有存储属性
+    ///（经计算属性会重入加锁而死锁）。
+    private let stateLock = NSLock()
+
+    /// 加锁执行并返回结果（harden-thread-safety design D1）。
+    @inline(__always)
+    private func withStateLock<T>(_ body: () -> T) -> T {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return body()
+    }
+
     private var didStart = false
+
+    /// 最小启动任务幂等门控（design D2）：首次执行后置 true，
+    /// 同一进程内重复激活安全模式不重复执行；进程重启即新实例，语义为
+    /// “每进程一次”。
+    private var didRunSafeModeLaunchTasks = false
 
     /// 会话代际标记：每次启动存活计时时自增。
     /// 计时闭包捕获启动时的代际值，触发时仅当代际仍匹配才执行确认，
@@ -87,6 +165,14 @@ public final class ALLaunchGuard {
     private var backgroundObserver: NSObjectProtocol?
     private var terminationObserver: NSObjectProtocol?
     private var _uiConfig: ALLaunchGuardConfig = .default
+
+    /// 锁保护的存储属性（经上方同名计算属性对外暴露，harden-thread-safety）。
+    private var _isInSafeMode = false
+    private var _crashThreshold: Int
+    private var _survivalTimeout: TimeInterval = 5
+    private weak var _delegate: ALLaunchGuardDelegate?
+    private var _fixActions: [ALLaunchGuardFixAction] = []
+    private var _safeModeLaunchTasks: [() -> Void] = []
 
     #if canImport(UIKit)
     /// 安全模式窗口协调器（单实例，tasks 2.1/2.2）。
@@ -110,7 +196,7 @@ public final class ALLaunchGuard {
         crashThreshold: Int = 3
     ) {
         self.storage = storage
-        self.crashThreshold = crashThreshold
+        self._crashThreshold = crashThreshold
         // 默认调度：主队列延迟 survivalTimeout 秒执行。
         // 主线程 hang ⇒ 确认永不发生 ⇒ 看门狗语义正确。
         // [weak self] 避免实例与闭包循环引用，且保证每次读取最新的 timeout 值。
@@ -155,56 +241,128 @@ public final class ALLaunchGuard {
     @discardableResult
     public func start() -> Bool {
         assert(Thread.isMainThread, "ALLaunchGuard.start() 必须在主线程调用")
-        guard !didStart else { return isInSafeMode }
-        didStart = true
+        return performStart()
+    }
 
+    /// 内部测试入口（fix-pr3-review-comments tasks 1.3）：与 `start()` 语义
+    /// 完全一致，仅豁免主线程断言——供并发幂等用例从多线程并发调用
+    ///（公开契约仍要求主线程调用，Release 下后台线程 start 本就容忍不崩）。
+    /// 非公共 API，仅 `@testable` 可见。
+    internal func startForConcurrencyTesting() -> Bool {
+        performStart()
+    }
+
+    /// start() 主体：单次加锁的原子 check-and-set 决策（fix-pr3-review-comments
+    /// tasks 1.1，修复 didStart 检查与置位分裂在两个临界区的幂等缺陷）。
+    ///
+    /// 锁内一次性完成：幂等门控检查-置位 + 裁决上一会话残留 + 预支写序列
+    /// + 阈值粘滞置位 + 存活计时会话快照；锁外仅执行副作用（通知注册、
+    /// 激活安全模式、存活计时调度）。锁内只算决策快照，激活副作用
+    ///（最小任务 / delegate / UI）一律锁外执行（design D1 纪律红线）。
+    private func performStart() -> Bool {
+        /// 单次加锁决策段产出的快照（锁内只算决策，锁外执行副作用）。
+        struct StartDecision {
+            let alreadyStarted: Bool
+            let shouldActivate: Bool
+            /// 未激活路径的存活计时会话快照（代际 + 本次打点）
+            let survivalGeneration: Int
+            let survivalMarkUptime: TimeInterval
+        }
+
+        let decision: StartDecision = withStateLock {
+            // ── 幂等门控：检查-置位原子化（同一临界区内完成）──
+            // 重复调用直接返回快照，不再注册观察者、不再写存储。
+            guard !didStart else {
+                return StartDecision(
+                    alreadyStarted: true,
+                    shouldActivate: false,
+                    survivalGeneration: 0,
+                    survivalMarkUptime: 0
+                )
+            }
+            didStart = true
+
+            // ── 1. 裁决上一会话残留状态 ──
+
+            // 1a. 粘滞安全模式：直接激活，不递增计数、不启动存活计时，
+            //     防止“安全模式页挂满 5 秒计数被清零后杀进程重启绕过检测”。
+            //     （isInSafeMode 置位由 activateSafeMode 锁内决策完成）
+            if storage.safeModeActive {
+                return StartDecision(
+                    alreadyStarted: false,
+                    shouldActivate: true,
+                    survivalGeneration: 0,
+                    survivalMarkUptime: 0
+                )
+            }
+
+            // 1b/1c. 上一会话死亡不计为启动闪退时清零计数（两条裁决依据，任一成立即可）：
+            //     ① 上次已进入后台（系统回收 / 上滑强杀后台 / 后台 OOM）；
+            //     ② 上次打点 uptime 大于本次 systemUptime：期间发生过设备重启，
+            //        重启导致的进程终止不是启动闪退（单调时钟，不受改时间/NTP 影响）。
+            if storage.lastLaunchDiedInBackground
+                || (storage.lastLaunchMarkUptime.map { $0 > ProcessInfo.processInfo.systemUptime } ?? false) {
+                storage.consecutiveCrashCount = 0
+            }
+
+            // ── 2. 预支递增计数 + 写入本次启动打点（新写序，design D2）──
+            //
+            // 崩溃原子性偏向多计：标记清零 → 打点 → count 最后写。任意相邻
+            // 两次写之间进程终止时，次启裁决保留本次闪退计数：
+            // ①标记已清、打点未写 → 次启按“无打点”处理，旧计数保留 +1
+            //   （多计一次，安全）；②打点已写、count 未写 → 次启读到新打点
+            //   与旧计数，正常 +1（正确）。宁可多计触发安全模式（宿主有
+            //   reset 出口），不可漏检崩溃循环（旧序 count 先写会在“count
+            //   已写、标记未清”死亡时被残留标记误清零）。
+            let count = storage.consecutiveCrashCount + 1
+            let markUptime = ProcessInfo.processInfo.systemUptime
+            storage.lastLaunchDiedInBackground = false
+            storage.lastLaunchMarkUptime = markUptime
+            storage.consecutiveCrashCount = count
+            currentSessionMarkUptime = markUptime
+
+            // ── 3. 阈值判定：持久化粘滞安全模式标记 ──
+
+            if count >= _crashThreshold {
+                storage.safeModeActive = true
+                return StartDecision(
+                    alreadyStarted: false,
+                    shouldActivate: true,
+                    survivalGeneration: 0,
+                    survivalMarkUptime: 0
+                )
+            }
+
+            // ── 4. 未触发：产出存活计时会话快照（代际自增 + 本次打点）──
+            launchGeneration += 1
+            return StartDecision(
+                alreadyStarted: false,
+                shouldActivate: false,
+                survivalGeneration: launchGeneration,
+                survivalMarkUptime: currentSessionMarkUptime ?? 0
+            )
+        }
+
+        // 重复调用：返回当前 isInSafeMode 的锁内快照（不重复注册观察者）。
+        guard !decision.alreadyStarted else { return withStateLock { _isInSafeMode } }
+
+        // 通知观察者注册在锁外（无自身状态读写，回调统一主队列，tasks 2.1）；
+        // didStart 原子 check-and-set 保证仅首次调用执行到此处（恰一次）。
         registerLifecycleObservers()
 
-        // ── 1. 裁决上一会话残留状态 ──
-
-        // 1a. 粘滞安全模式：直接激活，不递增计数、不启动存活计时，
-        //     防止"安全模式页挂满 5 秒计数被清零后杀进程重启绕过检测"。
-        if storage.safeModeActive {
+        // ── 锁外副作用：激活安全模式（最小任务 / delegate / UI）──
+        if decision.shouldActivate {
             activateSafeMode()
             return true
         }
 
-        // 1b. 上次会话已进入后台：其死亡不计为启动闪退。
-        if storage.lastLaunchDiedInBackground {
-            storage.consecutiveCrashCount = 0
-        }
-
-        // 1c. 上次打点 uptime 大于本次 systemUptime：期间发生过设备重启，
-        //     重启导致的进程终止不是启动闪退（单调时钟，不受改时间/NTP 影响）。
-        if let lastUptime = storage.lastLaunchMarkUptime,
-           lastUptime > ProcessInfo.processInfo.systemUptime {
-            storage.consecutiveCrashCount = 0
-        }
-
-        // ── 2. 预支递增计数 + 写入本次启动打点 ──
-
-        let count = storage.consecutiveCrashCount + 1
-        storage.consecutiveCrashCount = count
-        let markUptime = ProcessInfo.processInfo.systemUptime
-        storage.lastLaunchMarkUptime = markUptime
-        storage.lastLaunchDiedInBackground = false
-        currentSessionMarkUptime = markUptime
-
-        // ── 3. 阈值判定：持久化粘滞安全模式标记 ──
-
-        if count >= crashThreshold {
-            storage.safeModeActive = true
-            activateSafeMode()
-            return true
-        }
-
-        // ── 4. 启动存活计时：到期自动清零（会话代际 + 打点双重校验防误清）──
-
-        launchGeneration += 1
-        let generation = launchGeneration
+        // ── 启动存活计时：到期自动清零（会话代际 + 打点双重校验防误清）──
         survivalScheduler { [weak self] in
             guard let self = self else { return }
-            self.confirmLaunchSurvival(generation: generation, markUptime: markUptime)
+            self.confirmLaunchSurvival(
+                generation: decision.survivalGeneration,
+                markUptime: decision.survivalMarkUptime
+            )
         }
         return false
     }
@@ -222,9 +380,13 @@ public final class ALLaunchGuard {
     ///   构建违反将以断言暴露，Release 容忍）。
     public func markLaunchSuccessful() {
         assert(Thread.isMainThread, "ALLaunchGuard.markLaunchSuccessful() 必须在主线程调用")
-        // 防御：start() 之前调用视为无效确认（无会话代际与打点可校验）
-        guard didStart else { return }
-        confirmLaunchSurvival(generation: launchGeneration, markUptime: currentSessionMarkUptime)
+        // 锁内取会话快照；防御：start() 之前调用视为无效确认（无会话代际与打点可校验）
+        let snapshot: (generation: Int, markUptime: TimeInterval?)? = withStateLock {
+            guard didStart else { return nil }
+            return (launchGeneration, currentSessionMarkUptime)
+        }
+        guard let (generation, markUptime) = snapshot else { return }
+        confirmLaunchSurvival(generation: generation, markUptime: markUptime)
     }
 
     /// Resets safe mode and clears the crash counter.
@@ -237,10 +399,15 @@ public final class ALLaunchGuard {
     ///   内部已在主队列调用本方法，宿主直调也应保证主线程。
     public func reset() {
         assert(Thread.isMainThread, "ALLaunchGuard.reset() 必须在主线程调用")
-        let wasInSafeMode = isInSafeMode
-        storage.consecutiveCrashCount = 0
-        storage.safeModeActive = false
-        isInSafeMode = false
+        // 锁内：状态读 + storage 写 + isInSafeMode 写原子化
+        let wasInSafeMode = withStateLock { () -> Bool in
+            let was = _isInSafeMode
+            storage.consecutiveCrashCount = 0
+            storage.safeModeActive = false
+            _isInSafeMode = false
+            return was
+        }
+        // 锁外：delegate 退出回调（防重入死锁，design D1 纪律红线）
         if wasInSafeMode {
             delegate?.launchGuardDidExitSafeMode(self)
         }
@@ -279,7 +446,9 @@ public final class ALLaunchGuard {
     ///
     /// 仅 `#if DEBUG` 构建存在，用于测试与示例演示；Release 构建下该入口不存在。
     public func enterSafeModeForTesting() {
-        storage.safeModeActive = true
+        // 锁内写粘滞标记；激活决策（isInSafeMode 置位）由 activateSafeMode
+        // 锁内完成，副作用锁外执行
+        withStateLock { storage.safeModeActive = true }
         activateSafeMode()
     }
     #endif
@@ -308,27 +477,52 @@ public final class ALLaunchGuard {
     /// - 存储中的打点仍是本会话写入的值（防旧会话闭包跨会话竞态误清；
     ///   no-op 存储读回 nil 时放行，保持纯计数降级模式下的自动清零能力）。
     internal func confirmLaunchSurvival(generation: Int, markUptime: TimeInterval?) {
-        guard generation == launchGeneration else { return }
-        if let expected = markUptime,
-           let current = storage.lastLaunchMarkUptime,
-           current != expected {
-            // 存储打点已被新会话覆盖，本闭包属于旧会话，放弃确认
-            return
+        // 锁内：代际 / 打点校验与两处 storage 写原子化（harden-thread-safety）
+        withStateLock {
+            guard generation == launchGeneration else { return }
+            if let expected = markUptime,
+               let current = storage.lastLaunchMarkUptime,
+               current != expected {
+                // 存储打点已被新会话覆盖，本闭包属于旧会话，放弃确认
+                return
+            }
+            storage.consecutiveCrashCount = 0
+            storage.lastLaunchDiedInBackground = false
         }
-        storage.consecutiveCrashCount = 0
-        storage.lastLaunchDiedInBackground = false
     }
 
     // MARK: - Private helpers
 
+    /// 激活安全模式（harden-thread-safety design D1）：锁内决策快照 + 锁外副作用。
+    ///
+    /// 三条激活路径（start 阈值 / 粘滞 / DEBUG 入口）统一走本方法，锁内
+    /// 完成 isInSafeMode 置位与最小任务门控（didRunSafeModeLaunchTasks，
+    /// 防重复置位 / 重复执行），锁外执行全部宿主副作用——delegate 回调、
+    /// safeModeLaunchTasks、窗口安装 / present 均不持锁（防重入死锁），
+    /// 宿主回调内可安全回读受保护状态（shouldEnterSafeMode / isInSafeMode）。
     private func activateSafeMode() {
-        isInSafeMode = true
+        // 锁内决策：置位 + 门控，并快照本次应执行的任务清单
+        let tasksToRun: [() -> Void]? = withStateLock {
+            _isInSafeMode = true
+            guard !didRunSafeModeLaunchTasks else { return nil }
+            didRunSafeModeLaunchTasks = true
+            return _safeModeLaunchTasks
+        }
+
+        // 锁外副作用①：安全模式最小启动任务（spec: crash-detection ADDED，
+        // design D1/D2）——在委托回调与 UI 安装之前同步按序执行，每进程仅
+        // 一次；任务内可安全读 isInSafeMode（已在锁内置位）。
+        tasksToRun?.forEach { $0() }
+
+        // 锁外副作用②：delegate 进入回调
         delegate?.launchGuardDidEnterSafeMode(self)
+
         #if canImport(UIKit)
-        // 自动展示分流（纯函数判定，spec: safe-mode-window / design D4）：
-        // .dedicatedWindow（默认）→ 独立窗口接管；.presentOnRoot → 在宿主
-        // rootVC 上 present 菜单页；.none → 不自动展示（宿主自行处理 UI）
-        switch Self.presentationRoute(for: _uiConfig) {
+        // 锁外副作用③：自动展示分流（纯函数判定，spec: safe-mode-window /
+        // design D4）：.dedicatedWindow（默认）→ 独立窗口接管；.presentOnRoot
+        // → 在宿主 rootVC 上 present 菜单页；.none → 不自动展示
+        //（宿主自行处理 UI）
+        switch Self.presentationRoute(for: uiConfig) {
         case .none:
             break
         case .dedicatedWindow:
@@ -342,12 +536,16 @@ public final class ALLaunchGuard {
     /// 注册生命周期通知观察者。
     ///
     /// UIKit 平台使用真实通知名；非 UIKit 平台注册字符串 shim 名
-    /// （行为为永不触发，测试通过 internal 方法直接模拟回调）。
+    ///（行为为永不触发，测试通过 internal 方法直接模拟回调）。
+    ///
+    /// 观察队列显式绑定主队列（harden-thread-safety tasks 2.1）：UIKit 生命
+    /// 周期通知本就主线程发帖，行为不变但隐式主线程契约升级为结构保证；
+    /// 回调与锁路径同队列，无新竞争。
     private func registerLifecycleObservers() {
         backgroundObserver = NotificationCenter.default.addObserver(
             forName: ALLaunchGuardDidEnterBackgroundNotification,
             object: nil,
-            queue: nil
+            queue: .main
         ) { [weak self] _ in
             self?.handleDidEnterBackground()
         }
@@ -355,7 +553,7 @@ public final class ALLaunchGuard {
         terminationObserver = NotificationCenter.default.addObserver(
             forName: ALLaunchGuardWillTerminateNotification,
             object: nil,
-            queue: nil
+            queue: .main
         ) { [weak self] _ in
             // A clean termination (user-initiated quit) should not be treated as
             // a crash, so reset the counter here.

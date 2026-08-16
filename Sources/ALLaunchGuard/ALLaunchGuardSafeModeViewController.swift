@@ -2,9 +2,8 @@
 import UIKit
 
 /// 菜单式安全模式页：以 UITableView 列表展示已注册的修复动作
-///（数据源为 `ALLaunchGuard.fixActions` 的页面加载时快照，
-/// 注册顺序即展示顺序，页面存续期间数据源变更不影响已展示列表，
-/// spec: safe-mode-ui MODIFIED），
+///（数据源为 viewDidLoad 时的 `fixActions` 快照，完整快照语义见
+/// `snapshotActions` 属性注释），
 /// 用户点击单项才执行修复；执行期间整表禁用交互（同一时间至多一个动作），
 /// 按结果反馈状态：成功打勾置灰不可再点 / 失败红色警示且可重试。
 ///
@@ -44,8 +43,9 @@ public final class ALLaunchGuardSafeModeViewController: UIViewController {
     private let config: ALLaunchGuardConfig
 
     /// 页面存续期间的唯一动作数据源：viewDidLoad 快照一次
-    ///（design D4，spec: safe-mode-ui MODIFIED）——行数 / 渲染 / 执行统一使用快照，
-    /// 页面展示期间宿主重新赋值 fixActions 不影响已展示列表；
+    ///（design D4，spec: safe-mode-ui MODIFIED）——注册顺序即展示顺序，
+    /// 行数 / 渲染 / 执行统一使用快照，页面展示期间宿主重新赋值
+    /// fixActions 不影响已展示列表；
     /// 快照时 fixActions 为空则注入内置重置动作兜底（design D2）。
     private var snapshotActions: [ALLaunchGuardFixAction] = []
 
@@ -177,12 +177,8 @@ public final class ALLaunchGuardSafeModeViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
 
-        // 数据源快照（design D2/D4，spec: safe-mode-ui MODIFIED）：
-        // - viewDidLoad 快照一次，行数 / 渲染 / 执行统一使用快照，
-        //   页面存续期间宿主重新赋值 fixActions 不影响已展示列表
-        //   （无行数与内容错位）；
-        // - fixActions 为空时注入内置重置动作兜底，安全模式恒有用户出口，
-        //   列表恒非空（无纯空态）。
+        // 数据源快照：完整语义（一次快照 / 空时注入兜底）见 `snapshotActions`
+        // 属性注释（design D2/D4，spec: safe-mode-ui MODIFIED）。
         var actions = launchGuard?.fixActions ?? []
         if actions.isEmpty {
             actions = [ALLaunchGuardResetSafeModeAction()]

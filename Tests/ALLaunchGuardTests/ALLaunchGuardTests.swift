@@ -28,8 +28,11 @@ let noOpScheduler: (@escaping () -> Void) -> Void = { _ in }
 
 final class MockDelegate: ALLaunchGuardDelegate {
     var enteredSafeMode = false
-    var exitedSafeMode = false
+    /// 退出安全模式回调次数（0 即未退出；曾为 exitedSafeMode/exitCount 双状态，
+    /// cleanup-unused-code 合一）
     var exitCount = 0
+    /// 进入安全模式时额外执行的记录闭包（供最小启动任务顺序断言注入）
+    var onEnterSafeMode: (() -> Void)?
     /// 已完成的修复动作记录（action, success），供编排层测试断言
     private(set) var finishedActions: [(action: ALLaunchGuardFixAction, success: Bool)] = []
 
@@ -38,10 +41,10 @@ final class MockDelegate: ALLaunchGuardDelegate {
 
     func launchGuardDidEnterSafeMode(_ guard: ALLaunchGuard) {
         enteredSafeMode = true
+        onEnterSafeMode?()
     }
 
     func launchGuardDidExitSafeMode(_ guard: ALLaunchGuard) {
-        exitedSafeMode = true
         exitCount += 1
     }
 
@@ -67,20 +70,6 @@ final class ALLaunchGuardTests: XCTestCase {
         XCTAssertFalse(guard_.isInSafeMode)
     }
 
-    func testSuccessfulLaunchResetsCrashCounter() {
-        let storage = MockStorage()
-        // 注：预置由 2 改为 1——原预置 2 时 start() 后计数即达阈值 3、必进安全模式，
-        // 与本测试“成功启动重置计数且不进安全模式”的意图及
-        // testSafeModeActivatesAtThreshold 的断言矛盾（基线即失败，属存量缺陷，本次迁移）。
-        storage.consecutiveCrashCount = 1   // start() 后为 2，未达阈值 3
-        let guard_ = ALLaunchGuard(storage: storage, crashThreshold: 3)
-        guard_.survivalScheduler = noOpScheduler
-        guard_.start()
-        guard_.markLaunchSuccessful()
-        XCTAssertEqual(storage.consecutiveCrashCount, 0)
-        XCTAssertFalse(guard_.isInSafeMode)
-    }
-
     // MARK: Safe mode activation
 
     func testSafeModeActivatesAtThreshold() {
@@ -91,12 +80,17 @@ final class ALLaunchGuardTests: XCTestCase {
         XCTAssertTrue(guard_.isInSafeMode)
     }
 
+    /// 未达阈值不激活；成功启动确认（markLaunchSuccessful）重置预支计数
+    ///（原 testSuccessfulLaunchResetsCrashCounter 重叠断言并入，语义不减）
     func testSafeModeNotActivatedBelowThreshold() {
         let storage = MockStorage()
         storage.consecutiveCrashCount = 1   // will become 2 after start()
         let guard_ = ALLaunchGuard(storage: storage, crashThreshold: 3)
+        guard_.survivalScheduler = noOpScheduler
         guard_.start()
         XCTAssertFalse(guard_.isInSafeMode)
+        guard_.markLaunchSuccessful()
+        XCTAssertEqual(storage.consecutiveCrashCount, 0)
     }
 
     func testDelegateCalledOnSafeModeEntry() {
@@ -116,7 +110,7 @@ final class ALLaunchGuardTests: XCTestCase {
         guard_.delegate = delegate
         guard_.start()   // count=1, not in safe mode
         guard_.reset()
-        XCTAssertFalse(delegate.exitedSafeMode)
+        XCTAssertEqual(delegate.exitCount, 0)
     }
 
     // MARK: Reset
@@ -140,7 +134,7 @@ final class ALLaunchGuardTests: XCTestCase {
         guard_.delegate = delegate
         guard_.start()
         guard_.reset()
-        XCTAssertTrue(delegate.exitedSafeMode)
+        XCTAssertEqual(delegate.exitCount, 1)
     }
 
     // MARK: start() idempotency
@@ -194,17 +188,15 @@ final class ALLaunchGuardTests: XCTestCase {
         XCTAssertFalse(config.allowRestartExit)
     }
 
-    func testAutoPresentFalseDoesNotChangeGuardBehaviour() {
-        // When autoPresent is false the guard still enters safe mode;
-        // the UI is just not shown automatically.
-        let storage = MockStorage()
-        storage.consecutiveCrashCount = 2
-        let guard_ = ALLaunchGuard(storage: storage, crashThreshold: 3)
+    /// uiConfig setter 冒烟：macOS 测试环境下 autoPresent 无可影响的行为面
+    ///（展示分流仅存在于 UIKit），仅验证赋值与读回；激活行为不受 autoPresent
+    /// 影响已由阈值/任务类用例覆盖（原全链路用例断言语义无损失）。
+    func testAutoPresentFalseUiConfigSetterSmoke() {
+        let guard_ = ALLaunchGuard(storage: MockStorage(), crashThreshold: 3)
         var config = ALLaunchGuardConfig()
         config.autoPresent = false
         guard_.uiConfig = config
-        guard_.start()
-        XCTAssertTrue(guard_.isInSafeMode)
+        XCTAssertFalse(guard_.uiConfig.autoPresent)
     }
 
     // MARK: 展示样式与自动展示分流（tasks 1.1，spec: safe-mode-window）
@@ -493,7 +485,7 @@ final class ALLaunchGuardTests: XCTestCase {
         XCTAssertFalse(guard_.isInSafeMode)
         XCTAssertFalse(storage.safeModeActive)
         XCTAssertEqual(storage.consecutiveCrashCount, 0)
-        XCTAssertTrue(delegate.exitedSafeMode)
+        XCTAssertEqual(delegate.exitCount, 1)
 
         // 下次启动恢复正常流程
         let next = ALLaunchGuard(storage: storage, crashThreshold: 3)
@@ -539,5 +531,200 @@ final class ALLaunchGuardTests: XCTestCase {
         XCTAssertTrue(next.start())
         XCTAssertEqual(storage.consecutiveCrashCount, 0)
         #endif
+    }
+
+    // MARK: 安全模式最小启动任务（tasks 1.1，spec: crash-detection ADDED）
+
+    /// 阈值触发：两个任务按注册顺序各执行一次，且先于 delegate 进入回调
+    func testSafeModeLaunchTasksRunInOrderBeforeDelegateOnThreshold() {
+        let storage = MockStorage()
+        storage.consecutiveCrashCount = 2   // start() 后达阈值 3
+        let guard_ = ALLaunchGuard(storage: storage, crashThreshold: 3)
+        var config = ALLaunchGuardConfig()
+        config.autoPresent = false
+        guard_.uiConfig = config
+
+        // 任务与 delegate 回调写入同一顺序数组
+        var order: [String] = []
+        guard_.safeModeLaunchTasks = [
+            { order.append("task1") },
+            { order.append("task2") },
+        ]
+        let delegate = MockDelegate()
+        delegate.onEnterSafeMode = { order.append("delegate") }
+        guard_.delegate = delegate
+
+        XCTAssertTrue(guard_.start())
+        XCTAssertEqual(order, ["task1", "task2", "delegate"])
+        XCTAssertTrue(delegate.enteredSafeMode)
+    }
+
+    /// 粘滞路径：storage.safeModeActive = true 后 start() 激活，任务执行一次
+    func testSafeModeLaunchTasksRunOnStickyPath() {
+        let storage = MockStorage()
+        storage.safeModeActive = true
+        let guard_ = ALLaunchGuard(storage: storage, crashThreshold: 3)
+        var config = ALLaunchGuardConfig()
+        config.autoPresent = false
+        guard_.uiConfig = config
+
+        var runCount = 0
+        guard_.safeModeLaunchTasks = [{ runCount += 1 }]
+        guard_.delegate = MockDelegate()
+
+        XCTAssertTrue(guard_.start())
+        XCTAssertEqual(runCount, 1)
+
+        // 模拟杀进程重启（新实例共享存储，每进程一次语义）：再次执行一次
+        let relaunch = ALLaunchGuard(storage: storage, crashThreshold: 3)
+        var relaunchCount = 0
+        relaunch.safeModeLaunchTasks = [{ relaunchCount += 1 }]
+        XCTAssertTrue(relaunch.start())
+        XCTAssertEqual(relaunchCount, 1)
+    }
+
+    /// DEBUG 直入路径：enterSafeModeForTesting 激活时任务同样执行
+    func testSafeModeLaunchTasksRunOnDebugEntryPath() {
+        #if DEBUG
+        let storage = MockStorage()
+        let guard_ = ALLaunchGuard(storage: storage, crashThreshold: 3)
+        var config = ALLaunchGuardConfig()
+        config.autoPresent = false
+        guard_.uiConfig = config
+
+        var runCount = 0
+        guard_.safeModeLaunchTasks = [{ runCount += 1 }]
+
+        guard_.enterSafeModeForTesting()
+        XCTAssertEqual(runCount, 1)
+        #endif
+    }
+
+    /// 同进程二次激活不重复执行（每进程一次幂等，design D2）
+    func testSafeModeLaunchTasksRunOnlyOncePerProcess() {
+        #if DEBUG
+        let storage = MockStorage()
+        storage.consecutiveCrashCount = 2   // start() 阈值触发
+        let guard_ = ALLaunchGuard(storage: storage, crashThreshold: 3)
+        var config = ALLaunchGuardConfig()
+        config.autoPresent = false
+        guard_.uiConfig = config
+
+        var runCount = 0
+        guard_.safeModeLaunchTasks = [{ runCount += 1 }]
+
+        guard_.start()                          // 第一次激活：执行
+        guard_.enterSafeModeForTesting()        // 同进程叠加第二次激活
+        XCTAssertEqual(runCount, 1)
+        #endif
+    }
+
+    /// 未注册无副作用：默认空数组时行为与未引入本需求一致
+    func testSafeModeLaunchTasksEmptyByDefaultHasNoSideEffect() {
+        let storage = MockStorage()
+        storage.consecutiveCrashCount = 2
+        let guard_ = ALLaunchGuard(storage: storage, crashThreshold: 3)
+        var config = ALLaunchGuardConfig()
+        config.autoPresent = false
+        guard_.uiConfig = config
+        let delegate = MockDelegate()
+        guard_.delegate = delegate
+
+        XCTAssertTrue(guard_.safeModeLaunchTasks.isEmpty)
+        XCTAssertTrue(guard_.start())
+        XCTAssertTrue(guard_.isInSafeMode)
+        XCTAssertTrue(delegate.enteredSafeMode)   // 既有行为不变
+        XCTAssertEqual(storage.consecutiveCrashCount, 3)
+    }
+
+    // MARK: 并发安全（harden-thread-safety tasks 1.1，spec: crash-detection ADDED）
+
+    /// hammer：8 路并发读 shouldEnterSafeMode/isInSafeMode，同时主线程串行
+    /// start/reset 写路径（独立实例 + 独立 MockStorage）——读路径不崩不死锁。
+    /// XCTestExpectation 超时保护：若锁引入死锁，等待超期即测试失败。
+    func testConcurrentReadsDuringStartResetDoNotCrashOrDeadlock() {
+        let hammerExpectation = expectation(description: "并发读路径 hammer 完成")
+        hammerExpectation.expectedFulfillmentCount = 8
+
+        // 读侧：共享单例（UserDefaults 后端），任意线程读路径
+        let shared = ALLaunchGuard.shared
+        DispatchQueue.concurrentPerform(iterations: 8) { _ in
+            for _ in 0..<2000 {
+                _ = shared.shouldEnterSafeMode
+                _ = shared.isInSafeMode
+            }
+            hammerExpectation.fulfill()
+        }
+
+        // 写侧：主线程串行循环 start/reset（独立实例 + 独立 MockStorage，
+        // 不触碰共享存储；与上方读线程并发执行）
+        for _ in 0..<20 {
+            let storage = MockStorage()
+            storage.consecutiveCrashCount = 2   // start() 后达阈值触发安全模式
+            let guard_ = ALLaunchGuard(storage: storage, crashThreshold: 3)
+            guard_.survivalScheduler = noOpScheduler
+            guard_.start()
+            guard_.reset()
+        }
+
+        wait(for: [hammerExpectation], timeout: 30)
+    }
+
+    /// 并发 start 幂等（fix-pr3-review-comments tasks 1.3）：同一实例 + 共享
+    /// MockStorage，8 路并发调用 start（经 internal 测试入口豁免主线程断言，
+    /// 公开 start() 的主线程契约不变）。断言：计数仅预支一次（0 → 1），
+    /// 无崩溃无死锁（Expectation 超时保护）——回归修复前“检查与置位分裂
+    /// 在两个临界区导致重复预支写存储”的缺陷。
+    func testConcurrentStartIsIdempotentOnSameInstance() {
+        let storage = MockStorage()
+        let guard_ = ALLaunchGuard(storage: storage, crashThreshold: 3)
+        guard_.survivalScheduler = noOpScheduler   // 避免存活计时派发主队列
+
+        let startExpectation = expectation(description: "8 路并发 start 完成")
+        startExpectation.expectedFulfillmentCount = 8
+
+        DispatchQueue.concurrentPerform(iterations: 8) { _ in
+            _ = guard_.startForConcurrencyTesting()
+            startExpectation.fulfill()
+        }
+        wait(for: [startExpectation], timeout: 30)
+
+        // 仅一次预支：重复调用不得重复写存储
+        XCTAssertEqual(storage.consecutiveCrashCount, 1)
+        XCTAssertFalse(guard_.isInSafeMode)
+        XCTAssertFalse(storage.safeModeActive)
+    }
+
+    /// 写序崩溃原子性推演（design D2）：模拟预支写入中途进程终止的残留态
+    /// ——后台标记已清、本次打点已写、计数未写——次启裁决不得误清旧计数，
+    /// 本次启动正常预支递增（2 → 3），偏向多计而非漏检。
+    func testPartialWriteResidualStateIsNotMisCleared() {
+        let storage = MockStorage()
+        storage.lastLaunchDiedInBackground = false             // 标记已清（第一步已写）
+        storage.lastLaunchMarkUptime = 123                     // 打点已写（第二步已写，小于当前 uptime 非设备重启）
+        storage.consecutiveCrashCount = 2                      // 计数未写（进程在此前终止）
+        let guard_ = ALLaunchGuard(storage: storage, crashThreshold: 5)
+        guard_.survivalScheduler = noOpScheduler
+        XCTAssertFalse(guard_.start())
+        XCTAssertEqual(storage.consecutiveCrashCount, 3)       // 未被误清：旧值 + 1
+    }
+
+    /// 死锁回归：阈值触发路径下 delegate 进入回调内回读 shouldEnterSafeMode /
+    /// isInSafeMode（回调在锁外执行，加锁后不得重入死锁）。
+    func testDelegateReadingShouldEnterSafeModeInsideCallbackDoesNotDeadlock() {
+        let storage = MockStorage()
+        storage.consecutiveCrashCount = 2   // start() 后达阈值触发
+        let guard_ = ALLaunchGuard(storage: storage, crashThreshold: 3)
+        let delegate = MockDelegate()
+        var readsInCallback: (shouldEnter: Bool, isInSafeMode: Bool)?
+        delegate.onEnterSafeMode = {
+            readsInCallback = (guard_.shouldEnterSafeMode, guard_.isInSafeMode)
+        }
+        guard_.delegate = delegate
+
+        // 若误在锁内触发回调，此处即死锁挂起——测试超时报错即暴露回归
+        XCTAssertTrue(guard_.start())
+        XCTAssertEqual(readsInCallback?.shouldEnter, true)
+        XCTAssertEqual(readsInCallback?.isInSafeMode, true)
     }
 }

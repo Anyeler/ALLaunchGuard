@@ -13,7 +13,7 @@ ALLaunchGuard 是一个 iOS 启动安全模式库：通过**打点法**（预支
 - 判定核心：`start()` 状态机返回 `Bool`（进入安全模式返回 `true`）
 - 修复编排：`fixActions: [ALLaunchGuardFixAction]` 菜单数据源 + `perform(_:completion:)` 统一编排
 - 界面接管：`presentationStyle` 默认 `.dedicatedWindow`（独立 UIWindow，不依赖宿主是否构建界面）
-- 内置动作：清缓存（`ALLaunchGuardClearCacheAction`）与闭包包装（`ALLaunchGuardClosureAction`）
+- 内置动作：清缓存、深度清理缓存、重置安全模式、重启应用与闭包包装（详见 FixAction 章节）
 - 生命周期回调：`ALLaunchGuardDelegate`（进入 / 退出 / 修复完成）
 
 ---
@@ -35,7 +35,7 @@ ALLaunchGuard 是一个 iOS 启动安全模式库：通过**打点法**（预支
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Anyeler/ALLaunchGuard.git", from: "2.0.0")
+    .package(url: "https://github.com/Anyeler/ALLaunchGuard.git", from: "2.1.0")
 ]
 ```
 
@@ -44,7 +44,7 @@ dependencies: [
 ### CocoaPods
 
 ```ruby
-pod 'ALLaunchGuard', '~> 2.0'
+pod 'ALLaunchGuard', '~> 2.1'
 ```
 
 然后执行 `pod install`。
@@ -178,6 +178,20 @@ ALLaunchGuard.shared.enterSafeModeForTesting()
 **粘滞安全模式**：激活标记持久化，杀进程重启无法绕过；唯一的退出路径是修复
 动作成功（自动 `reset()`）或手动调用 `reset()`。
 
+### 已知限制：预支写序崩溃原子性偏向多计
+
+`start()` 预支计数的持久化写序为：**后台标记清零 → 本次启动打点 →
+计数最后写**。若进程在任意相邻两次写入之间终止，下次启动裁决**偏向
+多计**（保留本次闪退计数）而非漏计：
+
+| 中断时刻 | 次启裁决结果 |
+|------|------|
+| 标记已清、打点未写 | 按“无打点”处理，旧计数保留 +1（多计一次） |
+| 打点已写、计数未写 | 读到新打点与旧计数，正常 +1（正确） |
+
+取舍依据：宁可多计触发安全模式（宿主有 `reset()` 出口），不可漏检
+崩溃循环（漏检无纠正手段）。
+
 ### 已知限制：iOS 15/16 预热（prewarming）bug 盲区
 
 iOS 15/16 存在预热执行 bug：系统预热启动偶发会执行到 `didFinishLaunching`
@@ -308,14 +322,71 @@ final class ClearDemoDataAction: ALLaunchGuardFixAction {
 - 失败 → 不改动任何安全模式状态（允许用户重试）；
 - 菜单页 UI 反馈：成功打勾置灰不可再点 / 失败红色警示可重试 / 执行中整表禁交互。
 
-轻量场景可直接使用内置包装：
+轻量场景可直接使用内置动作（共五个）：
+
+| 动作 | 说明 | 破坏性 |
+|------|------|--------|
+| `ALLaunchGuardClosureAction` | 闭包包装：一行注册轻量自定义逻辑 | 可配置 |
+| `ALLaunchGuardClearCacheAction` | 清沙盒 Caches 目录（含子目录），轻档位 | 否 |
+| `ALLaunchGuardClearAllCacheAction` | 白名单式沙盒深度清理，深档位 | 是 |
+| `ALLaunchGuardResetSafeModeAction` | 重置安全模式（`fixActions` 为空时自动兜底注入） | 是 |
+| `ALLaunchGuardRestartAction` | 重启应用（exit(0)，约定注册于菜单末位） | 是 |
+
+注册示例（重启置于末位）：
 
 ```swift
 ALLaunchGuard.shared.fixActions = [
-    ALLaunchGuardClearCacheAction(),  // 内置：清沙盒 Caches 目录（含子目录）
+    ALLaunchGuardClearCacheAction(),                    // 内置：清沙盒 Caches（轻档位）
     ALLaunchGuardClosureAction(title: "重置账号", iconSystemName: "person.crop.circle.badge.xmark") { completion in
         MyAccountCenter.reset { completion(true) }
-    }
+    },
+    ALLaunchGuardRestartAction()                        // 内置：重启应用（约定置于末位）
+]
+```
+
+### 深度清理缓存的清理范围（`ALLaunchGuardClearAllCacheAction`）
+
+枚举沙盒顶层目录，按白名单保护 + 定向清理：
+
+| 类别 | 范围 |
+|------|------|
+| 保护（不删） | `Documents`、`SystemData`、`Library` 中 Caches 之外的部分（如 Preferences） |
+| 清理 | `tmp` 内容（目录保留）、`.Trash` 内容（目录保留）、保护名单外的游离顶层项（整个删除）、`Library/Caches` 内容 |
+
+- 保护名单经 `protectedTopLevelItems` 可扩展（默认 `["Documents", "Library", "SystemData"]`），
+  宿主自建的顶层目录建议加入保护，避免误删；
+- 条目在枚举后消失按成功处理（幂等）；单项删除失败继续清理其余项，
+  最终聚合失败（安全模式保持激活，用户可重试）；
+- 后台低优先级队列（`qos: .utility`）执行，不阻塞修复页交互。
+
+**档位选择建议**：优先注册轻档位 `ALLaunchGuardClearCacheAction`（仅系统本就
+可随时回收的 Caches，风险最低）；仅当闪退疑似由更广范围的脏数据引起、
+且用户可接受更大清理面时，再追加深档位 `ALLaunchGuardClearAllCacheAction`。
+两者为独立动作可并存（菜单中同时呈现，由用户自选）；全清范围已含 Caches，
+无需担心重复注册造成冲突。
+
+### 重启动作与菜单重启按钮的关系
+
+`ALLaunchGuardRestartAction`（菜单项）与菜单页底部的“重启应用”按钮
+（`allowRestartExit` 控制）是两条独立路径，可并存或二选一：
+
+- **按钮**：任一修复成功后才呈现，点击经系统 Alert 二次确认，受
+  `allowRestartExit` 审核开关控制（UI 层能力）；
+- **动作**：用户显式点击菜单项执行——先回调成功使编排层 reset（清粘滞
+  标记）先入主队列，随后主队列晚一拍 `exit(0)`，保证粘滞标记清除先于
+  进程终止，下次冷启动不再进入安全模式。
+
+动作由宿主显式注册（非默认行为），审核敏感的宿主可不注册
+（`exit(0)` 审核争议见上文 `allowRestartExit` 章节）。菜单位置由注册
+顺序决定，库不自动排序也不自动注入——约定将重启动作注册在**末位**：
+
+```swift
+ALLaunchGuard.shared.fixActions = [
+    ALLaunchGuardClearCacheAction(),
+    ALLaunchGuardClearAllCacheAction(
+        protectedTopLevelItems: ["Documents", "Library", "SystemData", "MyAppData"]  // 扩展保护自建目录
+    ),
+    ALLaunchGuardRestartAction()   // 末位：重启应用
 ]
 ```
 
@@ -433,6 +504,44 @@ appDelegate/sceneDelegate 都不会执行），安全模式窗口为唯一界面
 其他启动编排器（或自研任务队列）同理：把"执行启动编排"整体放在 `start()`
 返回 `false` 的分支内即可。
 
+### 安全模式最小启动任务（`safeModeLaunchTasks`）
+
+安全模式下宿主跳过全部启动任务（含编排器入口 `onceUponAnApp`），但仍有
+少数必要的最小模块（如日志上报 SDK）需要初始化，才能完成修复流程中的
+诊断与上报。库提供一等概念的最小任务钩子：在 `didFinishLaunching` 首行
+注册，进入安全模式时（任一路径）由库在委托回调与安全模式 UI 呈现之前
+同步、按注册顺序执行，每个进程生命周期仅一次：
+
+```swift
+// 1. 注册安全模式最小启动任务（首行，先于 start()）
+ALLaunchGuard.shared.safeModeLaunchTasks = [
+    {
+        // 示例：初始化日志上报 SDK（伪代码）
+        // LogSDK.configure(mode: .safeMode)
+        // LogSDK.flushLaunchDiagnostics()
+    },
+    /* …其他最小任务… */
+]
+
+// 2. 门控：安全模式下跳过应用级编排
+if ALLaunchGuard.shared.start() {
+    return true
+}
+```
+
+任务约束（宿主必须遵守，库不做运行时防护）：
+
+- **自包含**：不得依赖宿主正常启动图中的模块（安全模式下正常启动图
+  被整体跳过）；
+- **轻量同步**：在安全模式首帧前于主线程同步执行，禁止磁盘 IO，
+  重量级初始化会拖慢修复页呈现；
+- **禁止触碰启动编排器内部状态**：MPLaunch 宿主不得在任务内访问
+  `LaunchParams.inputs` 一类编排器内部 API。
+
+MPLaunch 宿主可在任务闭包内桥接编排器的依赖图执行能力（例如 MPLaunch
+1.3.0 预告的 `runSafeModeTasks` 入口）——该能力属 mplaunch 仓库的独立
+增量，ALLaunchGuard 本身不依赖、不引用任何启动编排器。
+
 ---
 
 ## SwiftUI 接入
@@ -493,14 +602,24 @@ struct MyApp: App {
 
 ## 线程契约
 
-`start()` / `markLaunchSuccessful()` / `reset()` 必须在**主线程**调用
-（`didFinishLaunching` 首行 / `App.init` 调用天然满足；
-`perform(_:completion:)` 编排层内部已在主队列调用 `reset()`，宿主直调
-也应保证主线程）：
+（harden-thread-safety 起：核心状态经内部 `stateLock` 串行化保护）
 
-- **Debug 构建**：违反将以断言暴露（`assert(Thread.isMainThread)`）；
-- **Release 构建**：容忍，不崩溃——防闪退库不应在宿主误用时制造新的
-  崩溃面，但后台线程调用存在存储读写的数据竞争风险，请务必遵守契约。
+- **读路径任意线程安全**：`shouldEnterSafeMode` / `isInSafeMode` 可在
+  任意线程读取，并发写下不读到撕裂或中间状态；`crashThreshold` /
+  `survivalTimeout` / `fixActions` / `safeModeLaunchTasks` / `uiConfig` /
+  `delegate` 的存取同样串行化保护；
+- **写路径主线程**：`start()` / `markLaunchSuccessful()` / `reset()` 必须
+  在**主线程**调用（`didFinishLaunching` 首行 / `App.init` 调用天然满足）：
+  - **Debug 构建**：违反将以断言暴露（`assert(Thread.isMainThread)`）；
+  - **Release 构建**：容忍，不崩溃——防闪退库不应在宿主误用时制造新的
+    崩溃面，但后台线程调用仍存在存储读写的数据竞争风险，请务必遵守契约；
+- **perform 主队列收口**：`perform(_:completion:)` 编排层内部已在主队列
+  执行 `reset()`、委托回调与 completion；生命周期通知观察者显式绑定主队列，
+  窗口安装入口在后台线程调用时自动派发主队列（后台误调收敛为“一帧延迟”
+  而非 UIKit 状态竞争）；
+- **自定义 Storage 宿主自负**：锁保护覆盖库自身状态与锁内的 storage
+  访问时序，`ALLaunchGuardStorage` 实现自身的线程安全性由宿主保证
+  （默认 `UserDefaultsLaunchGuardStorage` 基于 UserDefaults，本身线程安全）。
 
 ---
 
@@ -521,7 +640,8 @@ struct MyApp: App {
   也可免 UI 直注入：
   `xcrun simctl spawn <udid> defaults write <bundleid> BasicExample.autoCrashRemaining -int 3`；
 - “直接进入安全模式”调试入口（DEBUG `enterSafeModeForTesting()`）；
-- 注册内置清缓存 + 自定义清理沙盒示例目录动作。
+- 注册四个修复动作：内置清理缓存 + 内置深度清理缓存 + 自定义清理沙盒示例
+  目录 + 内置重启应用（末位约定，红色警示样式）。
 
 ```bash
 xcodebuild -project Examples/BasicExample/BasicExample.xcodeproj \
@@ -579,7 +699,7 @@ config.restartHint = "修复完成后，请退出应用重新打开"
   `activateSafeModeWindow()` 或 `presentSafeModeMenu()`。
 - 原 `fixHandler` 清理逻辑迁移为注册 `ALLaunchGuardFixAction`
   （一行包装示例；`fixActions` 为空时库自动提供内置"重置安全模式"
-  兑底动作，不会出现无出口困局）：
+  兜底动作，不会出现无出口困局）：
 
 ```swift
 // 1.x：旧页 fixHandler 承担清理逻辑
