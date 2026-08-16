@@ -28,11 +28,20 @@ public final class ALLaunchGuard {
     /// Delegate to receive safe-mode lifecycle events.
     public weak var delegate: ALLaunchGuardDelegate?
 
+    /// Configuration for the built-in safe-mode UI.
+    ///
+    /// Assign before calling `start()` when using `autoPresent = true`.
+    public var uiConfig: ALLaunchGuardConfig {
+        get { _uiConfig }
+        set { _uiConfig = newValue }
+    }
+
     // MARK: - Private
 
     private let storage: ALLaunchGuardStorage
     private var didStart = false
     private var terminationObserver: NSObjectProtocol?
+    private var _uiConfig: ALLaunchGuardConfig = .default
 
     // MARK: - Init
 
@@ -47,6 +56,12 @@ public final class ALLaunchGuard {
     ) {
         self.storage = storage
         self.crashThreshold = crashThreshold
+    }
+
+    deinit {
+        if let observer = terminationObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     // MARK: - Public API
@@ -103,6 +118,11 @@ public final class ALLaunchGuard {
     private func activateSafeMode() {
         isInSafeMode = true
         delegate?.launchGuardDidEnterSafeMode(self)
+        #if canImport(UIKit)
+        if _uiConfig.autoPresent {
+            presentSafeModeUIIfNeeded()
+        }
+        #endif
     }
 }
 

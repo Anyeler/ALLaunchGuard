@@ -126,4 +126,40 @@ final class ALLaunchGuardTests: XCTestCase {
         guard_.start()
         XCTAssertTrue(guard_.isInSafeMode)
     }
+
+    // MARK: ALLaunchGuardConfig
+
+    func testConfigDefaultValues() {
+        let config = ALLaunchGuardConfig()
+        XCTAssertFalse(config.title.isEmpty)
+        XCTAssertFalse(config.message.isEmpty)
+        XCTAssertFalse(config.fixButtonTitle.isEmpty)
+        XCTAssertTrue(config.autoPresent)
+    }
+
+    func testConfigCustomValues() {
+        let config = ALLaunchGuardConfig(
+            title: "My Title",
+            message: "My Message",
+            fixButtonTitle: "Fix Now",
+            autoPresent: false
+        )
+        XCTAssertEqual(config.title, "My Title")
+        XCTAssertEqual(config.message, "My Message")
+        XCTAssertEqual(config.fixButtonTitle, "Fix Now")
+        XCTAssertFalse(config.autoPresent)
+    }
+
+    func testAutoPresentFalseDoesNotChangeGuardBehaviour() {
+        // When autoPresent is false the guard still enters safe mode;
+        // the UI is just not shown automatically.
+        let storage = MockStorage()
+        storage.consecutiveCrashCount = 2
+        let guard_ = ALLaunchGuard(storage: storage, crashThreshold: 3)
+        var config = ALLaunchGuardConfig()
+        config.autoPresent = false
+        guard_.uiConfig = config
+        guard_.start()
+        XCTAssertTrue(guard_.isInSafeMode)
+    }
 }

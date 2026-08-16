@@ -53,6 +53,8 @@ pod install
 
 ### 1. Start the guard as early as possible
 
+By default (`autoPresent = true`), the built-in safe-mode page is presented automatically when safe mode activates — **no additional code is required**.
+
 ```swift
 import ALLaunchGuard
 
@@ -64,20 +66,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
 
+        // Safe-mode page will pop up automatically if needed.
         ALLaunchGuard.shared.start()
-
-        if ALLaunchGuard.shared.isInSafeMode {
-            // The app has crashed on launch multiple times.
-            // Show a minimal / safe-mode UI instead of the normal flow.
-            showSafeModeUI()
-        } else {
-            showNormalUI()
-        }
 
         return true
     }
 }
 ```
+
+The page shows a warning icon, a title, a body message, and a **修复 (Fix)** button.  
+The user **must** tap Fix to clear the crash counter and dismiss the page.
 
 ### 2. Mark a successful launch
 
@@ -107,7 +105,22 @@ extension AppDelegate: ALLaunchGuardDelegate {
 }
 ```
 
-### 4. Reset safe mode
+### 4. Manually present the safe-mode page (optional)
+
+If you set `autoPresent = false`, call `presentSafeModeUIIfNeeded()` yourself at any point after the window is ready:
+
+```swift
+ALLaunchGuard.shared.uiConfig.autoPresent = false
+ALLaunchGuard.shared.start()
+
+// Later, once the window hierarchy is ready:
+ALLaunchGuard.shared.presentSafeModeUIIfNeeded {
+    // Optional: run app-specific clean-up before the guard resets
+    clearUserCaches()
+}
+```
+
+### 5. Reset safe mode
 
 Allow users to clear app state and exit safe mode:
 
@@ -119,12 +132,35 @@ ALLaunchGuard.shared.reset()
 
 ## Configuration
 
+### Guard behaviour
+
 | Property         | Type  | Default | Description                                              |
 |------------------|-------|---------|----------------------------------------------------------|
 | `crashThreshold` | `Int` | `3`     | Consecutive crash count required to activate safe mode.  |
 
 ```swift
 ALLaunchGuard.shared.crashThreshold = 5
+```
+
+### Safe-mode UI (`ALLaunchGuardConfig`)
+
+| Property         | Type      | Default                 | Description                                                    |
+|------------------|-----------|-------------------------|----------------------------------------------------------------|
+| `title`          | `String`  | `"应用启动异常"`         | Page title.                                                    |
+| `message`        | `String`  | *(Chinese description)* | Body message shown below the title.                            |
+| `fixButtonTitle` | `String`  | `"修复"`                 | Label of the Fix button.                                       |
+| `tintColor`      | `UIColor` | `.systemOrange`         | Accent colour for the icon and button.                         |
+| `autoPresent`    | `Bool`    | `true`                  | When `true`, the page appears automatically after `start()`.   |
+
+```swift
+var config = ALLaunchGuardConfig()
+config.title         = "Oops!"
+config.message       = "The app crashed on the last few launches. Tap Fix to recover."
+config.fixButtonTitle = "Fix Now"
+config.tintColor     = .systemRed
+config.autoPresent   = true
+ALLaunchGuard.shared.uiConfig = config
+ALLaunchGuard.shared.start()
 ```
 
 ---
