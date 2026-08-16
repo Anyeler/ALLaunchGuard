@@ -7,6 +7,11 @@ import UIKit
 /// The user must tap the **Fix** button to clear the crash counter and dismiss
 /// the page.  The host app can supply a custom `fixHandler` closure to run
 /// additional clean-up (e.g. clearing caches) before the guard is reset.
+///
+/// - Important: 已废弃的旧版单按钮页面，仅作为回退路径保留；
+///   新代码请使用菜单式的 `ALLaunchGuardSafeModeViewController`
+///   （`ALLaunchGuard.presentSafeModeMenu()`）。
+@available(iOS, deprecated: 2.0, message: "Use ALLaunchGuardSafeModeViewController")
 public final class ALLaunchGuardViewController: UIViewController {
 
     // MARK: - Public
@@ -68,15 +73,21 @@ public final class ALLaunchGuardViewController: UIViewController {
     }()
 
     private lazy var fixButton: UIButton = {
-        var cfg = UIButton.Configuration.filled()
-        cfg.title = config.fixButtonTitle
-        cfg.baseBackgroundColor = config.tintColor
-        cfg.baseForegroundColor = .white
-        cfg.cornerStyle = .large
-        cfg.buttonSize = .large
-        cfg.image = UIImage(systemName: "wrench.and.screwdriver.fill")
-        cfg.imagePadding = 8
-        let b = UIButton(configuration: cfg, primaryAction: nil)
+        // iOS 14 安全构造：系统按钮 + 手动样式（替代原 iOS 15+ 的 UIButton.Configuration，
+        // 修复与 iOS 14 部署目标的冲突；按钮行为与布局约束保持不变）。
+        let b = UIButton(type: .system)
+        // Config 的 fixButtonTitle 字段已移除（迁移为 restartHint 重启提示），
+        // 提示语不适合作为按钮文案，故此处保留旧默认文案“修复”。
+        b.setTitle("修复", for: .normal)
+        b.setTitleColor(.white, for: .normal)
+        b.titleLabel?.font = .systemFont(ofSize: 17, weight: .semibold)
+        b.backgroundColor = config.tintColor
+        b.layer.cornerRadius = 28   // 胶囊圆角（对应原 cornerStyle = .large，高度 56）
+        b.setImage(UIImage(systemName: "wrench.and.screwdriver.fill"), for: .normal)
+        b.tintColor = .white
+        // image 与 title 间距 8（iOS 14 无 imagePadding，用 inset 补偿并保持整体居中）
+        b.imageEdgeInsets = UIEdgeInsets(top: 0, left: -4, bottom: 0, right: 4)
+        b.titleEdgeInsets = UIEdgeInsets(top: 0, left: 4, bottom: 0, right: -4)
         b.translatesAutoresizingMaskIntoConstraints = false
         b.addTarget(self, action: #selector(didTapFix), for: .touchUpInside)
         return b
@@ -157,7 +168,7 @@ public final class ALLaunchGuardViewController: UIViewController {
     }
 }
 
-// MARK: - Convenience presentation
+// MARK: - Convenience presentation（已废弃，仅作回退路径保留）
 
 public extension ALLaunchGuard {
 
@@ -167,6 +178,7 @@ public extension ALLaunchGuard {
     /// - Parameters:
     ///   - fixHandler:  Optional closure executed when the user taps Fix, before
     ///                  the crash counter is cleared.
+    @available(iOS, deprecated: 2.0, message: "Use presentSafeModeMenu() instead")
     func presentSafeModeUIIfNeeded(fixHandler: (() -> Void)? = nil) {
         guard isInSafeMode else { return }
         DispatchQueue.main.async { [weak self] in
