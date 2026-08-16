@@ -178,6 +178,20 @@ ALLaunchGuard.shared.enterSafeModeForTesting()
 **粘滞安全模式**：激活标记持久化，杀进程重启无法绕过；唯一的退出路径是修复
 动作成功（自动 `reset()`）或手动调用 `reset()`。
 
+### 已知限制：预支写序崩溃原子性偏向多计
+
+`start()` 预支计数的持久化写序为：**后台标记清零 → 本次启动打点 →
+计数最后写**。若进程在任意相邻两次写入之间终止，下次启动裁决**偏向
+多计**（保留本次闪退计数）而非漏计：
+
+| 中断时刻 | 次启裁决结果 |
+|------|------|
+| 标记已清、打点未写 | 按“无打点”处理，旧计数保留 +1（多计一次） |
+| 打点已写、计数未写 | 读到新打点与旧计数，正常 +1（正确） |
+
+取舍依据：宁可多计触发安全模式（宿主有 `reset()` 出口），不可漏检
+崩溃循环（漏检无纠正手段）。
+
 ### 已知限制：iOS 15/16 预热（prewarming）bug 盲区
 
 iOS 15/16 存在预热执行 bug：系统预热启动偶发会执行到 `didFinishLaunching`
@@ -588,14 +602,24 @@ struct MyApp: App {
 
 ## 线程契约
 
-`start()` / `markLaunchSuccessful()` / `reset()` 必须在**主线程**调用
-（`didFinishLaunching` 首行 / `App.init` 调用天然满足；
-`perform(_:completion:)` 编排层内部已在主队列调用 `reset()`，宿主直调
-也应保证主线程）：
+（harden-thread-safety 起：核心状态经内部 `stateLock` 串行化保护）
 
-- **Debug 构建**：违反将以断言暴露（`assert(Thread.isMainThread)`）；
-- **Release 构建**：容忍，不崩溃——防闪退库不应在宿主误用时制造新的
-  崩溃面，但后台线程调用存在存储读写的数据竞争风险，请务必遵守契约。
+- **读路径任意线程安全**：`shouldEnterSafeMode` / `isInSafeMode` 可在
+  任意线程读取，并发写下不读到撕裂或中间状态；`crashThreshold` /
+  `survivalTimeout` / `fixActions` / `safeModeLaunchTasks` / `uiConfig` /
+  `delegate` 的存取同样串行化保护；
+- **写路径主线程**：`start()` / `markLaunchSuccessful()` / `reset()` 必须
+  在**主线程**调用（`didFinishLaunching` 首行 / `App.init` 调用天然满足）：
+  - **Debug 构建**：违反将以断言暴露（`assert(Thread.isMainThread)`）；
+  - **Release 构建**：容忍，不崩溃——防闪退库不应在宿主误用时制造新的
+    崩溃面，但后台线程调用仍存在存储读写的数据竞争风险，请务必遵守契约；
+- **perform 主队列收口**：`perform(_:completion:)` 编排层内部已在主队列
+  执行 `reset()`、委托回调与 completion；生命周期通知观察者显式绑定主队列，
+  窗口安装入口在后台线程调用时自动派发主队列（后台误调收敛为“一帧延迟”
+  而非 UIKit 状态竞争）；
+- **自定义 Storage 宿主自负**：锁保护覆盖库自身状态与锁内的 storage
+  访问时序，`ALLaunchGuardStorage` 实现自身的线程安全性由宿主保证
+  （默认 `UserDefaultsLaunchGuardStorage` 基于 UserDefaults，本身线程安全）。
 
 ---
 

@@ -81,12 +81,22 @@ internal final class ALLaunchGuardSafeModeWindowCoordinator {
     /// 安装安全模式窗口接管（幂等）：已安装（已挂载或已发起等待）直接返回，
     /// 重复调用不创建新窗口——自动分流路径与显式入口共用（tasks 2.2）。
     ///
+    /// 线程处理（harden-thread-safety design D4）：非主线程调用时自动派发
+    /// 主队列后 return（与 activateSafeModeWindow 既有模式对齐），Release 下
+    /// 后台误调从“UIKit 状态竞争”收敛为“一帧延迟”；主线程直接执行。
+    ///
     /// - Parameter rootViewController: 安全模式页（作为窗口 rootViewController）。
-    /// - Precondition: 主线程调用（UIKit 状态访问；公共入口已派发主队列）。
+    /// - Precondition: 主线程执行后续逻辑（UIKit 状态访问；后台调用自 hop）。
     func install(rootViewController: UIViewController) {
+        // 自 hop 主队列（harden-thread-safety design D4）：非主线程派发后
+        // return，幂等门控在 hop 后的主线程执行中生效。
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { self.install(rootViewController: rootViewController) }
+            return
+        }
         // 与 start()/reset() 同策略：Debug 断言暴露误用、Release 容忍
-        //（防闪退库不在宿主误用时于 Release 崩溃）。公共入口
-        // activateSafeModeWindow 已保证主线程派发，此断言防御未来新增调用点。
+        //（防闪退库不在宿主误用时于 Release 崩溃）。此处作为哨兵保留：
+        // 自 hop 后本应恒在主线程，断言防御未来绕过 hop 的新增调用点。
         assert(Thread.isMainThread, "安全模式窗口安装必须在主线程执行")
 
         // 幂等门控：窗口已挂载（window != nil），或安装已发起、正等待

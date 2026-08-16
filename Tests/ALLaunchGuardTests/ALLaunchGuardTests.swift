@@ -647,4 +647,70 @@ final class ALLaunchGuardTests: XCTestCase {
         XCTAssertTrue(delegate.enteredSafeMode)   // 既有行为不变
         XCTAssertEqual(storage.consecutiveCrashCount, 3)
     }
+
+    // MARK: 并发安全（harden-thread-safety tasks 1.1，spec: crash-detection ADDED）
+
+    /// hammer：8 路并发读 shouldEnterSafeMode/isInSafeMode，同时主线程串行
+    /// start/reset 写路径（独立实例 + 独立 MockStorage）——读路径不崩不死锁。
+    /// XCTestExpectation 超时保护：若锁引入死锁，等待超期即测试失败。
+    func testConcurrentReadsDuringStartResetDoNotCrashOrDeadlock() {
+        let hammerExpectation = expectation(description: "并发读路径 hammer 完成")
+        hammerExpectation.expectedFulfillmentCount = 8
+
+        // 读侧：共享单例（UserDefaults 后端），任意线程读路径
+        let shared = ALLaunchGuard.shared
+        DispatchQueue.concurrentPerform(iterations: 8) { _ in
+            for _ in 0..<2000 {
+                _ = shared.shouldEnterSafeMode
+                _ = shared.isInSafeMode
+            }
+            hammerExpectation.fulfill()
+        }
+
+        // 写侧：主线程串行循环 start/reset（独立实例 + 独立 MockStorage，
+        // 不触碰共享存储；与上方读线程并发执行）
+        for _ in 0..<20 {
+            let storage = MockStorage()
+            storage.consecutiveCrashCount = 2   // start() 后达阈值触发安全模式
+            let guard_ = ALLaunchGuard(storage: storage, crashThreshold: 3)
+            guard_.survivalScheduler = noOpScheduler
+            guard_.start()
+            guard_.reset()
+        }
+
+        wait(for: [hammerExpectation], timeout: 30)
+    }
+
+    /// 写序崩溃原子性推演（design D2）：模拟预支写入中途进程终止的残留态
+    /// ——后台标记已清、本次打点已写、计数未写——次启裁决不得误清旧计数，
+    /// 本次启动正常预支递增（2 → 3），偏向多计而非漏检。
+    func testPartialWriteResidualStateIsNotMisCleared() {
+        let storage = MockStorage()
+        storage.lastLaunchDiedInBackground = false             // 标记已清（第一步已写）
+        storage.lastLaunchMarkUptime = 123                     // 打点已写（第二步已写，小于当前 uptime 非设备重启）
+        storage.consecutiveCrashCount = 2                      // 计数未写（进程在此前终止）
+        let guard_ = ALLaunchGuard(storage: storage, crashThreshold: 5)
+        guard_.survivalScheduler = noOpScheduler
+        XCTAssertFalse(guard_.start())
+        XCTAssertEqual(storage.consecutiveCrashCount, 3)       // 未被误清：旧值 + 1
+    }
+
+    /// 死锁回归：阈值触发路径下 delegate 进入回调内回读 shouldEnterSafeMode /
+    /// isInSafeMode（回调在锁外执行，加锁后不得重入死锁）。
+    func testDelegateReadingShouldEnterSafeModeInsideCallbackDoesNotDeadlock() {
+        let storage = MockStorage()
+        storage.consecutiveCrashCount = 2   // start() 后达阈值触发
+        let guard_ = ALLaunchGuard(storage: storage, crashThreshold: 3)
+        let delegate = MockDelegate()
+        var readsInCallback: (shouldEnter: Bool, isInSafeMode: Bool)?
+        delegate.onEnterSafeMode = {
+            readsInCallback = (guard_.shouldEnterSafeMode, guard_.isInSafeMode)
+        }
+        guard_.delegate = delegate
+
+        // 若误在锁内触发回调，此处即死锁挂起——测试超时报错即暴露回归
+        XCTAssertTrue(guard_.start())
+        XCTAssertEqual(readsInCallback?.shouldEnter, true)
+        XCTAssertEqual(readsInCallback?.isInSafeMode, true)
+    }
 }
