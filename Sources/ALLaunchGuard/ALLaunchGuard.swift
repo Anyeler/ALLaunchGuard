@@ -43,11 +43,6 @@ public final class ALLaunchGuard {
     private var terminationObserver: NSObjectProtocol?
     private var _uiConfig: ALLaunchGuardConfig = .default
 
-    deinit {
-        if let terminationObserver {
-            NotificationCenter.default.removeObserver(terminationObserver)
-        }
-    }
     // MARK: - Init
 
     /// Creates a guard instance backed by the provided storage.
