@@ -275,7 +275,7 @@ final class ALLaunchGuardFixActionTests: XCTestCase {
     }
 
     /// 编排：重置动作成功触发 reset 退出安全模式 + 委托回调
-    ///（空 fixActions 兑底出口的核心链路，tasks 3.1；
+    ///（空 fixActions 兜底出口的核心链路，tasks 3.1；
     /// perform 编排层既有回归见上方执行编排节）
     func testResetSafeModeActionOrchestrationExitsSafeMode() {
         let storage = MockStorage()
@@ -308,7 +308,7 @@ final class ALLaunchGuardFixActionTests: XCTestCase {
     }
 
     /// 升级残留粘滞标记首启直接进入安全模式：宿主未注册任何动作时，
-    /// 重置动作仍是有效退出出口（proposal 缺陷 ② 兑底场景）
+    /// 重置动作仍是有效退出出口（proposal 缺陷 ② 兜底场景）
     func testResetSafeModeActionExitsStickySafeModeFromLegacyResidue() {
         let storage = MockStorage()
         storage.safeModeActive = true   // 1.x 升级残留粘滞标记

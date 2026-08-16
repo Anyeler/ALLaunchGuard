@@ -8,7 +8,7 @@ import UIKit
 /// 用户点击单项才执行修复；执行期间整表禁用交互（同一时间至多一个动作），
 /// 按结果反馈状态：成功打勾置灰不可再点 / 失败红色警示且可重试。
 ///
-/// 空动作列表兑底（design D2 / spec: safe-mode-ui MODIFIED）：快照时
+/// 空动作列表兜底（design D2 / spec: safe-mode-ui MODIFIED）：快照时
 /// `fixActions` 为空则自动注入内置重置动作
 /// （`ALLaunchGuardResetSafeModeAction`），保证安全模式始终存在
 /// 用户退出出口（覆盖宿主忘记注册与升级残留计数场景），
@@ -46,7 +46,7 @@ public final class ALLaunchGuardSafeModeViewController: UIViewController {
     /// 页面存续期间的唯一动作数据源：viewDidLoad 快照一次
     ///（design D4，spec: safe-mode-ui MODIFIED）——行数 / 渲染 / 执行统一使用快照，
     /// 页面展示期间宿主重新赋值 fixActions 不影响已展示列表；
-    /// 快照时 fixActions 为空则注入内置重置动作兑底（design D2）。
+    /// 快照时 fixActions 为空则注入内置重置动作兜底（design D2）。
     private var snapshotActions: [ALLaunchGuardFixAction] = []
 
     /// 各动作项执行状态（索引与 `snapshotActions` 对齐）
@@ -181,7 +181,7 @@ public final class ALLaunchGuardSafeModeViewController: UIViewController {
         // - viewDidLoad 快照一次，行数 / 渲染 / 执行统一使用快照，
         //   页面存续期间宿主重新赋值 fixActions 不影响已展示列表
         //   （无行数与内容错位）；
-        // - fixActions 为空时注入内置重置动作兑底，安全模式恒有用户出口，
+        // - fixActions 为空时注入内置重置动作兜底，安全模式恒有用户出口，
         //   列表恒非空（无纯空态）。
         var actions = launchGuard?.fixActions ?? []
         if actions.isEmpty {

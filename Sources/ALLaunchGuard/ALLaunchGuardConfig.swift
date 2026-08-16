@@ -5,7 +5,7 @@ import Foundation
 public enum ALLaunchGuardPresentationStyle: String {
     /// 独立 UIWindow 接管显示（默认）：不依赖宿主是否构建了 window/root VC——
     /// 宿主跳过启动流程时此窗为唯一界面；宿主漏分流时因更高 windowLevel
-    /// 形成覆盖兑底（双保险）。
+    /// 形成覆盖兜底（双保险）。
     case dedicatedWindow
     /// 在宿主 key window rootVC 上 present（旧行为兼容路径）：宿主必须已构建
     /// 自身界面，否则无处可挂。

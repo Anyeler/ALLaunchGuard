@@ -84,7 +84,7 @@ public final class ALLaunchGuardClosureAction: ALLaunchGuardFixAction {
 
 // MARK: - 内置重置安全模式动作
 
-/// 内置重置安全模式动作：`fixActions` 为空时由菜单页自动注入的兑底出口
+/// 内置重置安全模式动作：`fixActions` 为空时由菜单页自动注入的兜底出口
 ///（spec: safe-mode-ui MODIFIED——安全模式始终存在用户退出路径，
 /// 覆盖宿主忘记注册动作与 1.x 升级残留计数首启触发场景）。
 ///
@@ -92,7 +92,7 @@ public final class ALLaunchGuardClosureAction: ALLaunchGuardFixAction {
 /// `ALLaunchGuard.perform(_:completion:)` 统一触发一次 `reset()`
 ///（清零计数、清除粘滞标记、退出回调），用户重启应用即恢复正常。
 /// 也可由宿主显式注册到 `fixActions` 中作为“最后一项”退出出口；
-/// 注意推荐优先注册业务修复动作（清缓存等），本动作仅为兑底。
+/// 注意推荐优先注册业务修复动作（清缓存等），本动作仅为兜底。
 public final class ALLaunchGuardResetSafeModeAction: ALLaunchGuardFixAction {
 
     /// 默认中文标题

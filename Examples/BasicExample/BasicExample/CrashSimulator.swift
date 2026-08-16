@@ -53,7 +53,7 @@ final class BasicExampleCrashSimulator {
         defaults.set(0, forKey: Self.remainingKey)
     }
 
-    /// 演示自然结束后归零兑底（进入安全模式时 AppDelegate 已调 disarm()
+    /// 演示自然结束后归零兜底（进入安全模式时 AppDelegate 已调 disarm()
     /// 清零，remaining 用尽的场景下本方法保证语义完整）
     func disarmIfFinished() {
         if remainingAutoCrashes <= 0 {

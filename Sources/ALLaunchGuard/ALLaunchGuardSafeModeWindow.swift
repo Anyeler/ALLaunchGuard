@@ -15,12 +15,12 @@ import UIKit
 ///      降级创建窗口（不等超时，消除 5 秒黑屏）；
 ///    - 配置了 manifest（SceneDelegate 生命周期，scene 尚未连接）→ 暂存
 ///      root，监听 `UIScene.willConnectNotification`，scene 连接后重找并
-///      挂载；超时仍未挂载则全屏 frame 降级兑底。
+///      挂载；超时仍未挂载则全屏 frame 降级兜底。
 ///
 /// 状态机（fix-review-findings + fix-lifecycle-review-findings，
 /// spec: safe-mode-window MODIFIED）：
 /// install 后窗口存在三种状态——未创建（等待 scene）/ 已挂 scene（正式
-/// 挂载）/ 降级 frame（超时兑底，windowScene == nil）。超时创建降级窗口时
+/// 挂载）/ 降级 frame（超时兜底，windowScene == nil）。超时创建降级窗口时
 /// **保留** willConnect 观察者（仅取消超时任务）；scene 迟到连接时废弃
 /// 降级窗口并以 `UIWindow(windowScene:)` 重新挂载（迁移同一
 /// rootViewController），保证 scene 宿主中界面最终可见。
@@ -48,7 +48,7 @@ import UIKit
 internal final class ALLaunchGuardSafeModeWindowCoordinator {
 
     /// scene 等待超时时长（秒）：配置了 scene manifest 但 install 后超过
-    /// 该时长仍未挂载，则以全屏 frame 降级创建窗口（极端异常兑底：scene
+    /// 该时长仍未挂载，则以全屏 frame 降级创建窗口（极端异常兜底：scene
     /// 迟迟未连接）。独立常量，与 survivalTimeout 无语义关联。
     private static let sceneWaitTimeout: TimeInterval = 5
 
@@ -116,7 +116,7 @@ internal final class ALLaunchGuardSafeModeWindowCoordinator {
             show(window: window, rootViewController: rootViewController)
         } else {
             // SceneDelegate 生命周期（scene 尚未连接）：暂存 root，等待
-            // scene 连接通知，并保留超时降级兑底。
+            // scene 连接通知，并保留超时降级兜底。
             pendingRootViewController = rootViewController
             observeSceneWillConnect()
             scheduleFallbackTimeout()
@@ -146,7 +146,7 @@ internal final class ALLaunchGuardSafeModeWindowCoordinator {
     /// deinit 才能覆盖该自愈路径；观察者唯一清理点是 deinit。
     private func show(window: UIWindow, rootViewController: UIViewController) {
         window.rootViewController = rootViewController
-        // design D3：高于一切常规窗口（宿主漏分流时覆盖兑底），
+        // design D3：高于一切常规窗口（宿主漏分流时覆盖兜底），
         // 不与系统 alert 层冲突（菜单页自身的 UIAlert 仍可正常弹出）。
         window.windowLevel = .normal + 100
         window.makeKeyAndVisible()
@@ -267,7 +267,7 @@ internal final class ALLaunchGuardSafeModeWindowCoordinator {
     /// 任意 UIWindowScene（foregroundInactive/unattached——scene 激活后
     /// 绑定的窗口自然可见，系统行为）。
     /// design（Non-Goals）：多 scene 并发（iPad 分屏）下不做精细策略，
-    /// 单窗口语义；完全无 scene 时由调用方的分流链路兑底。
+    /// 单窗口语义；完全无 scene 时由调用方的分流链路兜底。
     private static func bestAvailableWindowScene() -> UIWindowScene? {
         let windowScenes = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
@@ -287,7 +287,7 @@ internal enum ALLaunchGuardWindowMountDecision: Equatable {
     /// 立即以全屏 frame 降级创建窗口，不等超时
     case immediateFrameFallback
     /// 无 scene 但配置了 scene manifest（scene 尚未连接）：注册
-    /// willConnect 观察 + 超时降级兑底
+    /// willConnect 观察 + 超时降级兜底
     case waitSceneWithTimeout
 
     /// 决策纯函数（无 UIKit 依赖，macOS/Linux 可直接单测）：
