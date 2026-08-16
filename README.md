@@ -640,7 +640,8 @@ struct MyApp: App {
   也可免 UI 直注入：
   `xcrun simctl spawn <udid> defaults write <bundleid> BasicExample.autoCrashRemaining -int 3`；
 - “直接进入安全模式”调试入口（DEBUG `enterSafeModeForTesting()`）；
-- 注册内置清缓存 + 自定义清理沙盒示例目录动作。
+- 注册四个修复动作：内置清理缓存 + 内置深度清理缓存 + 自定义清理沙盒示例
+  目录 + 内置重启应用（末位约定，红色警示样式）。
 
 ```bash
 xcodebuild -project Examples/BasicExample/BasicExample.xcodeproj \
