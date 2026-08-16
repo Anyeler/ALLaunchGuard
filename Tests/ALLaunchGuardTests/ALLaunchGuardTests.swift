@@ -670,6 +670,31 @@ final class ALLaunchGuardTests: XCTestCase {
         wait(for: [hammerExpectation], timeout: 30)
     }
 
+    /// 并发 start 幂等（fix-pr3-review-comments tasks 1.3）：同一实例 + 共享
+    /// MockStorage，8 路并发调用 start（经 internal 测试入口豁免主线程断言，
+    /// 公开 start() 的主线程契约不变）。断言：计数仅预支一次（0 → 1），
+    /// 无崩溃无死锁（Expectation 超时保护）——回归修复前“检查与置位分裂
+    /// 在两个临界区导致重复预支写存储”的缺陷。
+    func testConcurrentStartIsIdempotentOnSameInstance() {
+        let storage = MockStorage()
+        let guard_ = ALLaunchGuard(storage: storage, crashThreshold: 3)
+        guard_.survivalScheduler = noOpScheduler   // 避免存活计时派发主队列
+
+        let startExpectation = expectation(description: "8 路并发 start 完成")
+        startExpectation.expectedFulfillmentCount = 8
+
+        DispatchQueue.concurrentPerform(iterations: 8) { _ in
+            _ = guard_.startForConcurrencyTesting()
+            startExpectation.fulfill()
+        }
+        wait(for: [startExpectation], timeout: 30)
+
+        // 仅一次预支：重复调用不得重复写存储
+        XCTAssertEqual(storage.consecutiveCrashCount, 1)
+        XCTAssertFalse(guard_.isInSafeMode)
+        XCTAssertFalse(storage.safeModeActive)
+    }
+
     /// 写序崩溃原子性推演（design D2）：模拟预支写入中途进程终止的残留态
     /// ——后台标记已清、本次打点已写、计数未写——次启裁决不得误清旧计数，
     /// 本次启动正常预支递增（2 → 3），偏向多计而非漏检。
