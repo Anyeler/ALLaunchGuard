@@ -421,4 +421,213 @@ final class ALLaunchGuardFixActionTests: XCTestCase {
         wait(for: [exp], timeout: 2)
         XCTAssertEqual(result, false)
     }
+
+    // MARK: 内置重启动作（spec: fix-actions ADDED——内置重启动作，design D1）
+
+    /// 内置重启动作默认元数据：中文标题 + arrow.clockwise 图标 + 破坏性标记
+    func testRestartActionDefaultMetadata() {
+        let action = ALLaunchGuardRestartAction()
+        XCTAssertEqual(action.title, "重启应用")
+        XCTAssertEqual(action.iconSystemName, "arrow.clockwise")
+        XCTAssertTrue(action.isDestructive)
+
+        // 构造参数可自定义标题与图标；破坏性标记恒定 true（语义固定）
+        let custom = ALLaunchGuardRestartAction(title: "Restart", iconSystemName: "arrow.triangle.2.circlepath")
+        XCTAssertEqual(custom.title, "Restart")
+        XCTAssertEqual(custom.iconSystemName, "arrow.triangle.2.circlepath")
+        XCTAssertTrue(custom.isDestructive)
+    }
+
+    /// 经编排层执行重启动作（design D1 时序锚定）：
+    /// reset 生效（粘滞标记清除 + 计数清零）先于 exitHandler 被调用；
+    /// exitHandler 恰好一次。依赖主队列 FIFO——completion(true) 先行使
+    /// 编排层 reset 先入队，exitHandler 晚一拍入队。
+    func testRestartActionResetHappensBeforeExitHandlerViaOrchestration() {
+        let storage = MockStorage()
+        let delegate = MockDelegate()
+        let guard_ = makeGuardInSafeMode(storage: storage, delegate: delegate)
+
+        let action = ALLaunchGuardRestartAction()
+        var order: [String] = []   // 两个记录点均在主队列执行，无竞争风险
+        var exitCount = 0
+        let exitExp = expectation(description: "exitHandler invoked")
+        action.exitHandler = {
+            exitCount += 1
+            order.append("exitHandler")
+            exitExp.fulfill()
+        }
+
+        let exp = expectation(description: "restart action orchestration")
+        guard_.perform(action) { success in
+            XCTAssertTrue(success)
+            // 编排层 completion 在 reset() 之后回调：此刻粘滞标记应已清零
+            XCTAssertFalse(storage.safeModeActive)
+            XCTAssertEqual(storage.consecutiveCrashCount, 0)
+            order.append("reset")
+            exp.fulfill()
+        }
+        wait(for: [exp, exitExp], timeout: 2)
+
+        XCTAssertEqual(order, ["reset", "exitHandler"])   // reset 生效先于进程终止
+        XCTAssertEqual(exitCount, 1)                        // exitHandler 恰好一次
+        XCTAssertFalse(guard_.isInSafeMode)
+        XCTAssertEqual(delegate.exitCount, 1)
+    }
+
+    // MARK: 内置白名单缓存全清动作（spec: fix-actions ADDED——内置白名单缓存全清动作，design D2）
+
+    /// 构造完整模拟沙盒结构：Documents/f1、Library/Caches/f2、Library/Preferences/f3、
+    /// tmp/f4、SystemData/、.Trash/f5、游离文件 stray.txt、游离目录 strayDir/
+    private func makeSandboxRoot() throws -> URL {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory
+            .appendingPathComponent("ALLaunchGuardSandbox-\(UUID().uuidString)", isDirectory: true)
+        func makeDir(_ relativePath: String) throws {
+            try fileManager.createDirectory(
+                at: root.appendingPathComponent(relativePath),
+                withIntermediateDirectories: true)
+        }
+        func makeFile(_ relativePath: String) throws {
+            try Data("dummy".utf8).write(to: root.appendingPathComponent(relativePath))
+        }
+        try makeDir("Documents");           try makeFile("Documents/f1.txt")
+        try makeDir("Library/Caches");      try makeFile("Library/Caches/f2.cache")
+        try makeDir("Library/Preferences"); try makeFile("Library/Preferences/f3.plist")
+        try makeDir("tmp");                 try makeFile("tmp/f4.tmp")
+        try makeDir("SystemData")
+        try makeDir(".Trash");              try makeFile(".Trash/f5.trash")
+        try makeFile("stray.txt")
+        try makeDir("strayDir");            try makeFile("strayDir/inner.txt")
+        return root
+    }
+
+    /// 内置全清动作默认元数据：中文标题 + trash.slash 图标 + 破坏性标记
+    func testClearAllCacheActionDefaultMetadata() {
+        let action = ALLaunchGuardClearAllCacheAction()
+        XCTAssertEqual(action.title, "深度清理缓存")
+        XCTAssertEqual(action.iconSystemName, "trash.slash")
+        XCTAssertTrue(action.isDestructive)
+    }
+
+    /// 默认白名单保护（spec 场景）：Documents、SystemData 与 Library 中 Caches
+    /// 之外的内容保留；tmp 内容、.Trash、游离顶层项与 Library/Caches 内容被清空
+    func testClearAllCacheActionDefaultWhitelistClearsAndProtects() throws {
+        let fileManager = FileManager.default
+        let root = try makeSandboxRoot()
+        defer { try? fileManager.removeItem(at: root) }
+
+        let action = ALLaunchGuardClearAllCacheAction(sandboxRoot: root)
+        let exp = expectation(description: "clear all cache")
+        var result: Bool?
+        action.perform { success in
+            result = success
+            exp.fulfill()
+        }
+        wait(for: [exp], timeout: 5)
+        XCTAssertEqual(result, true)
+
+        // 保护项保留
+        XCTAssertTrue(fileManager.fileExists(atPath: root.appendingPathComponent("Documents/f1.txt").path))
+        var isDirectory = ObjCBool(false)
+        XCTAssertTrue(fileManager.fileExists(atPath: root.appendingPathComponent("SystemData").path, isDirectory: &isDirectory))
+        XCTAssertTrue(isDirectory.boolValue)
+        XCTAssertTrue(fileManager.fileExists(atPath: root.appendingPathComponent("Library/Preferences/f3.plist").path))
+
+        // 清理项清空（目录本身保留）
+        XCTAssertEqual(
+            try fileManager.contentsOfDirectory(atPath: root.appendingPathComponent("Library/Caches").path).count, 0)
+        XCTAssertEqual(
+            try fileManager.contentsOfDirectory(atPath: root.appendingPathComponent("tmp").path).count, 0)
+        XCTAssertEqual(
+            try fileManager.contentsOfDirectory(atPath: root.appendingPathComponent(".Trash").path).count, 0)
+
+        // 游离项整个删除
+        XCTAssertFalse(fileManager.fileExists(atPath: root.appendingPathComponent("stray.txt").path))
+        XCTAssertFalse(fileManager.fileExists(atPath: root.appendingPathComponent("strayDir").path))
+    }
+
+    /// 自定义 protectedTopLevelItems：宿主自建顶层目录加入保护名单后被保留
+    func testClearAllCacheActionCustomProtectedItemsPreserved() throws {
+        let fileManager = FileManager.default
+        let root = try makeSandboxRoot()
+        defer { try? fileManager.removeItem(at: root) }
+
+        let action = ALLaunchGuardClearAllCacheAction(
+            sandboxRoot: root,
+            protectedTopLevelItems: ["Documents", "Library", "SystemData", "strayDir"])
+        let exp = expectation(description: "custom protected items")
+        var result: Bool?
+        action.perform { success in
+            result = success
+            exp.fulfill()
+        }
+        wait(for: [exp], timeout: 5)
+        XCTAssertEqual(result, true)
+
+        // 自定义保护目录保留（含内容）；名单外游离文件仍被删除
+        XCTAssertTrue(fileManager.fileExists(atPath: root.appendingPathComponent("strayDir/inner.txt").path))
+        XCTAssertFalse(fileManager.fileExists(atPath: root.appendingPathComponent("stray.txt").path))
+    }
+
+    /// 沙盒根目录缺失：幂等成功（completion(true)）
+    func testClearAllCacheActionSucceedsWhenSandboxRootMissing() {
+        let missing = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ALLaunchGuardSandbox-missing-\(UUID().uuidString)")
+        let action = ALLaunchGuardClearAllCacheAction(sandboxRoot: missing)
+        let exp = expectation(description: "missing sandbox root")
+        var result: Bool?
+        action.perform { success in
+            result = success
+            exp.fulfill()
+        }
+        wait(for: [exp], timeout: 5)
+        XCTAssertEqual(result, true)
+    }
+
+    /// 单项删除失败：继续清理其余项，最终聚合 completion(false)（可重试）。
+    /// 策略：游离目录 strayDir 设为只读（0o555）——removeItem 递归删除其
+    /// 内容时因缺 w 权限失败；先探测权限法在当前进程环境下是否有效。
+    func testClearAllCacheActionContinuesOnSingleItemFailureAndAggregatesFalse() throws {
+        let fileManager = FileManager.default
+        let root = try makeSandboxRoot()
+        let strayDir = root.appendingPathComponent("strayDir")
+        defer {
+            // 恢复权限便于清理临时目录
+            try? fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: strayDir.path)
+            try? fileManager.removeItem(at: root)
+        }
+
+        try fileManager.setAttributes([.posixPermissions: 0o555], ofItemAtPath: strayDir.path)
+
+        // 权限法有效性探测：若删除居然成功（如以 root 运行），本环境无法构造失败路径
+        do {
+            try fileManager.removeItem(at: strayDir)
+            throw XCTSkip("权限限制在当前进程无效（疑似 root 进程），无法构造单项删除失败场景")
+        } catch let skip as XCTSkip {
+            throw skip
+        } catch {
+            // 预期抛出权限错误 ⇒ 权限法有效，进入正式断言
+        }
+
+        let action = ALLaunchGuardClearAllCacheAction(sandboxRoot: root)
+        let exp = expectation(description: "single item failure aggregation")
+        var result: Bool?
+        action.perform { success in
+            result = success
+            exp.fulfill()
+        }
+        wait(for: [exp], timeout: 5)
+
+        XCTAssertEqual(result, false)   // 聚合失败（用户可重试）
+        // 其余项不受单项失败影响，继续清理完成
+        XCTAssertEqual(
+            try fileManager.contentsOfDirectory(atPath: root.appendingPathComponent("tmp").path).count, 0)
+        XCTAssertEqual(
+            try fileManager.contentsOfDirectory(atPath: root.appendingPathComponent(".Trash").path).count, 0)
+        XCTAssertEqual(
+            try fileManager.contentsOfDirectory(atPath: root.appendingPathComponent("Library/Caches").path).count, 0)
+        XCTAssertFalse(fileManager.fileExists(atPath: root.appendingPathComponent("stray.txt").path))
+        // 保护项仍保留
+        XCTAssertTrue(fileManager.fileExists(atPath: root.appendingPathComponent("Documents/f1.txt").path))
+    }
 }

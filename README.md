@@ -13,7 +13,7 @@ ALLaunchGuard 是一个 iOS 启动安全模式库：通过**打点法**（预支
 - 判定核心：`start()` 状态机返回 `Bool`（进入安全模式返回 `true`）
 - 修复编排：`fixActions: [ALLaunchGuardFixAction]` 菜单数据源 + `perform(_:completion:)` 统一编排
 - 界面接管：`presentationStyle` 默认 `.dedicatedWindow`（独立 UIWindow，不依赖宿主是否构建界面）
-- 内置动作：清缓存（`ALLaunchGuardClearCacheAction`）与闭包包装（`ALLaunchGuardClosureAction`）
+- 内置动作：清缓存、深度清理缓存、重置安全模式、重启应用与闭包包装（详见 FixAction 章节）
 - 生命周期回调：`ALLaunchGuardDelegate`（进入 / 退出 / 修复完成）
 
 ---
@@ -308,14 +308,71 @@ final class ClearDemoDataAction: ALLaunchGuardFixAction {
 - 失败 → 不改动任何安全模式状态（允许用户重试）；
 - 菜单页 UI 反馈：成功打勾置灰不可再点 / 失败红色警示可重试 / 执行中整表禁交互。
 
-轻量场景可直接使用内置包装：
+轻量场景可直接使用内置动作（共五个）：
+
+| 动作 | 说明 | 破坏性 |
+|------|------|--------|
+| `ALLaunchGuardClosureAction` | 闭包包装：一行注册轻量自定义逻辑 | 可配置 |
+| `ALLaunchGuardClearCacheAction` | 清沙盒 Caches 目录（含子目录），轻档位 | 否 |
+| `ALLaunchGuardClearAllCacheAction` | 白名单式沙盒深度清理，深档位 | 是 |
+| `ALLaunchGuardResetSafeModeAction` | 重置安全模式（`fixActions` 为空时自动兑底注入） | 是 |
+| `ALLaunchGuardRestartAction` | 重启应用（exit(0)，约定注册于菜单末位） | 是 |
+
+注册示例（重启置于末位）：
 
 ```swift
 ALLaunchGuard.shared.fixActions = [
-    ALLaunchGuardClearCacheAction(),  // 内置：清沙盒 Caches 目录（含子目录）
+    ALLaunchGuardClearCacheAction(),                    // 内置：清沙盒 Caches（轻档位）
     ALLaunchGuardClosureAction(title: "重置账号", iconSystemName: "person.crop.circle.badge.xmark") { completion in
         MyAccountCenter.reset { completion(true) }
-    }
+    },
+    ALLaunchGuardRestartAction()                        // 内置：重启应用（约定置于末位）
+]
+```
+
+### 深度清理缓存的清理范围（`ALLaunchGuardClearAllCacheAction`）
+
+枚举沙盒顶层目录，按白名单保护 + 定向清理：
+
+| 类别 | 范围 |
+|------|------|
+| 保护（不删） | `Documents`、`SystemData`、`Library` 中 Caches 之外的部分（如 Preferences） |
+| 清理 | `tmp` 内容（目录保留）、`.Trash` 内容（目录保留）、保护名单外的游离顶层项（整个删除）、`Library/Caches` 内容 |
+
+- 保护名单经 `protectedTopLevelItems` 可扩展（默认 `["Documents", "Library", "SystemData"]`），
+  宿主自建的顶层目录建议加入保护，避免误删；
+- 条目在枚举后消失按成功处理（幂等）；单项删除失败继续清理其余项，
+  最终聚合失败（安全模式保持激活，用户可重试）；
+- 后台低优先级队列（`qos: .utility`）执行，不阻塞修复页交互。
+
+**档位选择建议**：优先注册轻档位 `ALLaunchGuardClearCacheAction`（仅系统本就
+可随时回收的 Caches，风险最低）；仅当闪退疑似由更广范围的脏数据引起、
+且用户可接受更大清理面时，再追加深档位 `ALLaunchGuardClearAllCacheAction`。
+两者为独立动作可并存（菜单中同时呈现，由用户自选）；全清范围已含 Caches，
+无需担心重复注册造成冲突。
+
+### 重启动作与菜单重启按钮的关系
+
+`ALLaunchGuardRestartAction`（菜单项）与菜单页底部的“重启应用”按钮
+（`allowRestartExit` 控制）是两条独立路径，可并存或二选一：
+
+- **按钮**：任一修复成功后才呈现，点击经系统 Alert 二次确认，受
+  `allowRestartExit` 审核开关控制（UI 层能力）；
+- **动作**：用户显式点击菜单项执行——先回调成功使编排层 reset（清粘滞
+  标记）先入主队列，随后主队列晚一拍 `exit(0)`，保证粘滞标记清除先于
+  进程终止，下次冷启动不再进入安全模式。
+
+动作由宿主显式注册（非默认行为），审核敏感的宿主可不注册
+（`exit(0)` 审核争议见上文 `allowRestartExit` 章节）。菜单位置由注册
+顺序决定，库不自动排序也不自动注入——约定将重启动作注册在**末位**：
+
+```swift
+ALLaunchGuard.shared.fixActions = [
+    ALLaunchGuardClearCacheAction(),
+    ALLaunchGuardClearAllCacheAction(
+        protectedTopLevelItems: ["Documents", "Library", "SystemData", "MyAppData"]  // 扩展保护自建目录
+    ),
+    ALLaunchGuardRestartAction()   // 末位：重启应用
 ]
 ```
 
