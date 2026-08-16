@@ -35,7 +35,7 @@ ALLaunchGuard 是一个 iOS 启动安全模式库：通过**打点法**（预支
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Anyeler/ALLaunchGuard.git", from: "2.0.0")
+    .package(url: "https://github.com/Anyeler/ALLaunchGuard.git", from: "2.1.0")
 ]
 ```
 
@@ -44,7 +44,7 @@ dependencies: [
 ### CocoaPods
 
 ```ruby
-pod 'ALLaunchGuard', '~> 2.0'
+pod 'ALLaunchGuard', '~> 2.1'
 ```
 
 然后执行 `pod install`。
