@@ -433,6 +433,44 @@ appDelegate/sceneDelegate 都不会执行），安全模式窗口为唯一界面
 其他启动编排器（或自研任务队列）同理：把"执行启动编排"整体放在 `start()`
 返回 `false` 的分支内即可。
 
+### 安全模式最小启动任务（`safeModeLaunchTasks`）
+
+安全模式下宿主跳过全部启动任务（含编排器入口 `onceUponAnApp`），但仍有
+少数必要的最小模块（如日志上报 SDK）需要初始化，才能完成修复流程中的
+诊断与上报。库提供一等概念的最小任务钩子：在 `didFinishLaunching` 首行
+注册，进入安全模式时（任一路径）由库在委托回调与安全模式 UI 呈现之前
+同步、按注册顺序执行，每个进程生命周期仅一次：
+
+```swift
+// 1. 注册安全模式最小启动任务（首行，先于 start()）
+ALLaunchGuard.shared.safeModeLaunchTasks = [
+    {
+        // 示例：初始化日志上报 SDK（伪代码）
+        // LogSDK.configure(mode: .safeMode)
+        // LogSDK.flushLaunchDiagnostics()
+    },
+    /* …其他最小任务… */
+]
+
+// 2. 门控：安全模式下跳过应用级编排
+if ALLaunchGuard.shared.start() {
+    return true
+}
+```
+
+任务约束（宿主必须遵守，库不做运行时防护）：
+
+- **自包含**：不得依赖宿主正常启动图中的模块（安全模式下正常启动图
+  被整体跳过）；
+- **轻量同步**：在安全模式首帧前于主线程同步执行，禁止磁盘 IO，
+  重量级初始化会拖慢修复页呈现；
+- **禁止触碰启动编排器内部状态**：MPLaunch 宿主不得在任务内访问
+  `LaunchParams.inputs` 一类编排器内部 API。
+
+MPLaunch 宿主可在任务闭包内桥接编排器的依赖图执行能力（例如 MPLaunch
+1.3.0 预告的 `runSafeModeTasks` 入口）——该能力属 mplaunch 仓库的独立
+增量，ALLaunchGuard 本身不依赖、不引用任何启动编排器。
+
 ---
 
 ## SwiftUI 接入

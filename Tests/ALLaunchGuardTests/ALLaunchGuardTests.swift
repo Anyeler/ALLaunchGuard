@@ -30,6 +30,8 @@ final class MockDelegate: ALLaunchGuardDelegate {
     var enteredSafeMode = false
     var exitedSafeMode = false
     var exitCount = 0
+    /// 进入安全模式时额外执行的记录闭包（供最小启动任务顺序断言注入）
+    var onEnterSafeMode: (() -> Void)?
     /// 已完成的修复动作记录（action, success），供编排层测试断言
     private(set) var finishedActions: [(action: ALLaunchGuardFixAction, success: Bool)] = []
 
@@ -38,6 +40,7 @@ final class MockDelegate: ALLaunchGuardDelegate {
 
     func launchGuardDidEnterSafeMode(_ guard: ALLaunchGuard) {
         enteredSafeMode = true
+        onEnterSafeMode?()
     }
 
     func launchGuardDidExitSafeMode(_ guard: ALLaunchGuard) {
@@ -539,5 +542,109 @@ final class ALLaunchGuardTests: XCTestCase {
         XCTAssertTrue(next.start())
         XCTAssertEqual(storage.consecutiveCrashCount, 0)
         #endif
+    }
+
+    // MARK: 安全模式最小启动任务（tasks 1.1，spec: crash-detection ADDED）
+
+    /// 阈值触发：两个任务按注册顺序各执行一次，且先于 delegate 进入回调
+    func testSafeModeLaunchTasksRunInOrderBeforeDelegateOnThreshold() {
+        let storage = MockStorage()
+        storage.consecutiveCrashCount = 2   // start() 后达阈值 3
+        let guard_ = ALLaunchGuard(storage: storage, crashThreshold: 3)
+        var config = ALLaunchGuardConfig()
+        config.autoPresent = false
+        guard_.uiConfig = config
+
+        // 任务与 delegate 回调写入同一顺序数组
+        var order: [String] = []
+        guard_.safeModeLaunchTasks = [
+            { order.append("task1") },
+            { order.append("task2") },
+        ]
+        let delegate = MockDelegate()
+        delegate.onEnterSafeMode = { order.append("delegate") }
+        guard_.delegate = delegate
+
+        XCTAssertTrue(guard_.start())
+        XCTAssertEqual(order, ["task1", "task2", "delegate"])
+        XCTAssertTrue(delegate.enteredSafeMode)
+    }
+
+    /// 粘滞路径：storage.safeModeActive = true 后 start() 激活，任务执行一次
+    func testSafeModeLaunchTasksRunOnStickyPath() {
+        let storage = MockStorage()
+        storage.safeModeActive = true
+        let guard_ = ALLaunchGuard(storage: storage, crashThreshold: 3)
+        var config = ALLaunchGuardConfig()
+        config.autoPresent = false
+        guard_.uiConfig = config
+
+        var runCount = 0
+        guard_.safeModeLaunchTasks = [{ runCount += 1 }]
+        guard_.delegate = MockDelegate()
+
+        XCTAssertTrue(guard_.start())
+        XCTAssertEqual(runCount, 1)
+
+        // 模拟杀进程重启（新实例共享存储，每进程一次语义）：再次执行一次
+        let relaunch = ALLaunchGuard(storage: storage, crashThreshold: 3)
+        var relaunchCount = 0
+        relaunch.safeModeLaunchTasks = [{ relaunchCount += 1 }]
+        XCTAssertTrue(relaunch.start())
+        XCTAssertEqual(relaunchCount, 1)
+    }
+
+    /// DEBUG 直入路径：enterSafeModeForTesting 激活时任务同样执行
+    func testSafeModeLaunchTasksRunOnDebugEntryPath() {
+        #if DEBUG
+        let storage = MockStorage()
+        let guard_ = ALLaunchGuard(storage: storage, crashThreshold: 3)
+        var config = ALLaunchGuardConfig()
+        config.autoPresent = false
+        guard_.uiConfig = config
+
+        var runCount = 0
+        guard_.safeModeLaunchTasks = [{ runCount += 1 }]
+
+        guard_.enterSafeModeForTesting()
+        XCTAssertEqual(runCount, 1)
+        #endif
+    }
+
+    /// 同进程二次激活不重复执行（每进程一次幂等，design D2）
+    func testSafeModeLaunchTasksRunOnlyOncePerProcess() {
+        #if DEBUG
+        let storage = MockStorage()
+        storage.consecutiveCrashCount = 2   // start() 阈值触发
+        let guard_ = ALLaunchGuard(storage: storage, crashThreshold: 3)
+        var config = ALLaunchGuardConfig()
+        config.autoPresent = false
+        guard_.uiConfig = config
+
+        var runCount = 0
+        guard_.safeModeLaunchTasks = [{ runCount += 1 }]
+
+        guard_.start()                          // 第一次激活：执行
+        guard_.enterSafeModeForTesting()        // 同进程叠加第二次激活
+        XCTAssertEqual(runCount, 1)
+        #endif
+    }
+
+    /// 未注册无副作用：默认空数组时行为与未引入本需求一致
+    func testSafeModeLaunchTasksEmptyByDefaultHasNoSideEffect() {
+        let storage = MockStorage()
+        storage.consecutiveCrashCount = 2
+        let guard_ = ALLaunchGuard(storage: storage, crashThreshold: 3)
+        var config = ALLaunchGuardConfig()
+        config.autoPresent = false
+        guard_.uiConfig = config
+        let delegate = MockDelegate()
+        guard_.delegate = delegate
+
+        XCTAssertTrue(guard_.safeModeLaunchTasks.isEmpty)
+        XCTAssertTrue(guard_.start())
+        XCTAssertTrue(guard_.isInSafeMode)
+        XCTAssertTrue(delegate.enteredSafeMode)   // 既有行为不变
+        XCTAssertEqual(storage.consecutiveCrashCount, 3)
     }
 }

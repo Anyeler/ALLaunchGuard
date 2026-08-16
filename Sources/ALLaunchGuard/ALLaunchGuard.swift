@@ -63,6 +63,29 @@ public final class ALLaunchGuard {
     /// 动作会被强持有（生命周期与本单例同长），实现方应轻持有依赖。
     public var fixActions: [ALLaunchGuardFixAction] = []
 
+    /// 安全模式最小启动任务：进入安全模式时同步按序执行。
+    ///
+    /// 安全模式激活时（阈值触发 / 粘滞触发 / 调试直入，任一路径），库在
+    /// `isInSafeMode` 置位后、委托回调 `launchGuardDidEnterSafeMode` 与安全
+    /// 模式 UI 安装**之前**，按注册顺序同步执行全部任务，保证最小模块
+    /// （如日志上报 SDK）在修复页呈现前就绪。每个进程生命周期内仅执行
+    /// 一次（同进程内重复激活不重复执行；进程重启即新实例，会再次执行）。
+    /// 任务内可安全读取 `isInSafeMode`（已置位）。
+    ///
+    /// 任务约束（宿主必须遵守，库不做运行时防护）：
+    /// - 自包含：不得依赖宿主正常启动图中的模块（安全模式下正常启动图
+    ///   被整体跳过）；
+    /// - 轻量同步：在安全模式首帧前的主线程执行，重量级任务会拖慢
+    ///   修复页呈现，且任务崩溃会导致安全模式页无法呈现（由粘滞标记
+    ///   兜底：下次启动仍进安全模式）；
+    /// - 不做磁盘 IO；
+    /// - 禁止触碰启动编排器内部状态。使用启动编排器的宿主可在闭包内
+    ///   桥接编排器的最小任务执行能力——本库不依赖、不引用任何启动
+    ///   编排器。
+    ///
+    /// 默认空数组：行为与未引入本能力时完全一致。
+    public var safeModeLaunchTasks: [() -> Void] = []
+
     // MARK: - Internal（测试注入）
 
     /// 存活计时调度器：接收存活确认闭包，并在 `survivalTimeout` 到期后执行。
@@ -75,6 +98,11 @@ public final class ALLaunchGuard {
 
     private let storage: ALLaunchGuardStorage
     private var didStart = false
+
+    /// 最小启动任务幂等门控（design D2）：首次执行后置 true，
+    /// 同一进程内重复激活安全模式不重复执行；进程重启即新实例，语义为
+    /// “每进程一次”。
+    private var didRunSafeModeLaunchTasks = false
 
     /// 会话代际标记：每次启动存活计时时自增。
     /// 计时闭包捕获启动时的代际值，触发时仅当代际仍匹配才执行确认，
@@ -323,6 +351,12 @@ public final class ALLaunchGuard {
 
     private func activateSafeMode() {
         isInSafeMode = true
+        // 安全模式最小启动任务（spec: crash-detection ADDED，design D1/D2）：
+        // 在委托回调与 UI 安装之前同步按序执行，每进程仅一次。
+        if !didRunSafeModeLaunchTasks {
+            didRunSafeModeLaunchTasks = true
+            safeModeLaunchTasks.forEach { $0() }
+        }
         delegate?.launchGuardDidEnterSafeMode(self)
         #if canImport(UIKit)
         // 自动展示分流（纯函数判定，spec: safe-mode-window / design D4）：
