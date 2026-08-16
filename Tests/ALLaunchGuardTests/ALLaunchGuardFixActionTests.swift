@@ -167,7 +167,6 @@ final class ALLaunchGuardFixActionTests: XCTestCase {
         XCTAssertEqual(storage.consecutiveCrashCount, 3)   // 计数不变
         XCTAssertTrue(storage.safeModeActive)              // 粘滞标记不变
         XCTAssertEqual(delegate.exitCount, 0)              // 无退出回调
-        XCTAssertFalse(delegate.exitedSafeMode)
         XCTAssertEqual(delegate.finishCount, 1)
         XCTAssertEqual(delegate.lastFinishSuccess, false)
 

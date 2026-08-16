@@ -329,7 +329,7 @@ final class ClearDemoDataAction: ALLaunchGuardFixAction {
 | `ALLaunchGuardClosureAction` | 闭包包装：一行注册轻量自定义逻辑 | 可配置 |
 | `ALLaunchGuardClearCacheAction` | 清沙盒 Caches 目录（含子目录），轻档位 | 否 |
 | `ALLaunchGuardClearAllCacheAction` | 白名单式沙盒深度清理，深档位 | 是 |
-| `ALLaunchGuardResetSafeModeAction` | 重置安全模式（`fixActions` 为空时自动兑底注入） | 是 |
+| `ALLaunchGuardResetSafeModeAction` | 重置安全模式（`fixActions` 为空时自动兜底注入） | 是 |
 | `ALLaunchGuardRestartAction` | 重启应用（exit(0)，约定注册于菜单末位） | 是 |
 
 注册示例（重启置于末位）：
@@ -698,7 +698,7 @@ config.restartHint = "修复完成后，请退出应用重新打开"
   `activateSafeModeWindow()` 或 `presentSafeModeMenu()`。
 - 原 `fixHandler` 清理逻辑迁移为注册 `ALLaunchGuardFixAction`
   （一行包装示例；`fixActions` 为空时库自动提供内置"重置安全模式"
-  兑底动作，不会出现无出口困局）：
+  兜底动作，不会出现无出口困局）：
 
 ```swift
 // 1.x：旧页 fixHandler 承担清理逻辑

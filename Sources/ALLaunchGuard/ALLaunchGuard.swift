@@ -260,15 +260,12 @@ public final class ALLaunchGuard {
                 return true
             }
     
-            // 1b. 上次会话已进入后台：其死亡不计为启动闪退。
-            if storage.lastLaunchDiedInBackground {
-                storage.consecutiveCrashCount = 0
-            }
-    
-            // 1c. 上次打点 uptime 大于本次 systemUptime：期间发生过设备重启，
-            //     重启导致的进程终止不是启动闪退（单调时钟，不受改时间/NTP 影响）。
-            if let lastUptime = storage.lastLaunchMarkUptime,
-               lastUptime > ProcessInfo.processInfo.systemUptime {
+            // 1b/1c. 上一会话死亡不计为启动闪退时清零计数（两条裁决依据，任一成立即可）：
+            //     ① 上次已进入后台（系统回收 / 上滑强杀后台 / 后台 OOM）；
+            //     ② 上次打点 uptime 大于本次 systemUptime：期间发生过设备重启，
+            //        重启导致的进程终止不是启动闪退（单调时钟，不受改时间/NTP 影响）。
+            if storage.lastLaunchDiedInBackground
+                || (storage.lastLaunchMarkUptime.map { $0 > ProcessInfo.processInfo.systemUptime } ?? false) {
                 storage.consecutiveCrashCount = 0
             }
     

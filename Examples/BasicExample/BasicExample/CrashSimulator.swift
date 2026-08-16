@@ -53,14 +53,6 @@ final class BasicExampleCrashSimulator {
         defaults.set(0, forKey: Self.remainingKey)
     }
 
-    /// 演示自然结束后归零兜底（进入安全模式时 AppDelegate 已调 disarm()
-    /// 清零，remaining 用尽的场景下本方法保证语义完整）
-    func disarmIfFinished() {
-        if remainingAutoCrashes <= 0 {
-            defaults.set(0, forKey: Self.remainingKey)
-        }
-    }
-
     // MARK: - 启动调度（design D4：仅正常启动路径调用）
 
     /// 启动时调度自动崩溃：剩余 > 0 → 先递减持久化 → 约 1 秒后 fatalError。

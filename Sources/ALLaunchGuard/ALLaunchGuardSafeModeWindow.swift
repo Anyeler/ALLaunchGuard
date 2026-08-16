@@ -69,8 +69,8 @@ internal final class ALLaunchGuardSafeModeWindowCoordinator {
     /// 同时作为"安装已发起"的幂等门控依据）。
     private var pendingRootViewController: UIViewController?
 
-    /// scene 连接观察者（自 install 注册后持续保持至 deinit——覆盖
-    /// scene 被系统断连后重连的自愈路径，design D2）。
+    /// scene 连接观察者（持续保持至 deinit 的 rationale 见类文档，
+    /// fix-lifecycle-review-findings design D2）。
     private var sceneObserver: NSObjectProtocol?
 
     /// 超时降级任务（触发或任一窗口创建路径完成后取消清理，防重复创建）。
@@ -148,12 +148,8 @@ internal final class ALLaunchGuardSafeModeWindowCoordinator {
     }
 
     /// 配置并展示窗口（scene 挂载路径与降级路径共用收口：设 root、抬层级、
-    /// makeKeyAndVisible），随后取消超时降级任务（防重复创建降级窗口）。
-    ///
-    /// willConnect 观察者在任何路径下都**保留**（fix-lifecycle-review-
-    /// findings design D2）：正式挂载成功后系统仍可能断连 scene（释放
-    /// window 层级）并在重连时再次发出 willConnect，观察者持续保持至
-    /// deinit 才能覆盖该自愈路径；观察者唯一清理点是 deinit。
+    /// makeKeyAndVisible），随后取消超时降级任务（防重复创建降级窗口）；
+    /// willConnect 观察者保留至 deinit（见类文档，fix-lifecycle-review-findings design D2）。
     private func show(window: UIWindow, rootViewController: UIViewController) {
         window.rootViewController = rootViewController
         // design D3：高于一切常规窗口（宿主漏分流时覆盖兜底），
@@ -162,7 +158,7 @@ internal final class ALLaunchGuardSafeModeWindowCoordinator {
         window.makeKeyAndVisible()
         self.window = window
         pendingRootViewController = nil
-        // 仅取消超时任务，保留观察者（正式挂载与可恢复降级统一语义）
+        // 仅取消超时任务，观察者保留（正式挂载与可恢复降级统一语义，design D2）
         cancelFallbackTimeout()
     }
 
@@ -252,10 +248,9 @@ internal final class ALLaunchGuardSafeModeWindowCoordinator {
         )
     }
 
-    /// 取消超时降级任务（任何窗口创建路径完成后调用，防重复创建降级窗口）。
-    ///
-    /// 职责拆分说明（fix-lifecycle-review-findings design D2）：本函数
-    /// **不**触碰 willConnect 观察者——观察者不因挂载成功而移除。
+    /// 取消超时降级任务（任何窗口创建路径完成后调用，防重复创建降级窗口）；
+    /// **不**触碰 willConnect 观察者（保留 rationale 见类文档，
+    /// fix-lifecycle-review-findings design D2）。
     private func cancelFallbackTimeout() {
         timeoutWorkItem?.cancel()
         timeoutWorkItem = nil
