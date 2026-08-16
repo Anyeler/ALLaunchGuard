@@ -61,16 +61,6 @@
 - **WHEN** 宿主设置 restartHint 为自定义文案
 - **THEN** 页面底部展示该自定义文案
 
-### Requirement: 旧页面废弃与回退
-既有单按钮安全模式页 SHALL 标记废弃（编译期 deprecated 提示）但完整保留可用；新安全模式页 SHALL 成为自动展示（autoPresent）的默认页面。旧页面 MUST NOT 再使用 iOS 15+ 专属 API（与 iOS 14 部署目标一致）。
-
-#### Scenario: 默认展示新页面
-- **WHEN** 安全模式激活且 autoPresent 为 true
-- **THEN** 自动展示菜单式新页面（而非废弃的单按钮页面）
-
-#### Scenario: 旧页面仍可编译
-- **WHEN** 宿主代码直接使用废弃的单按钮页面
-- **THEN** 产生废弃编译警告但正常编译运行，页面在 iOS 14 设备上不因 API 版本崩溃
 
 ### Requirement: iOS 14 兼容
 新页面全部 UI 代码 MUST 仅使用 iOS 14 可用 API（如 UIButton(type:)、UITableView 常规 API），并 SHALL 通过 iOS destination 编译验证。

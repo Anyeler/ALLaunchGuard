@@ -564,22 +564,35 @@ xcodebuild -project Examples/BasicExample/BasicExample.xcodeproj \
 // 1.x
 config.fixButtonTitle = "修复"
 
-// 2.0：旧单按钮页已废弃，改为菜单式修复页；
+// 2.0：旧单按钮页已移除，改为菜单式修复页；
 // 原 fixButtonTitle 的"引导修复"语义迁移为底部常驻重启提示
 config.restartHint = "修复完成后，请退出应用重新打开"
 ```
 
-### 2. 旧版单按钮安全模式页已废弃
+### 2. 旧版单按钮安全模式页已移除
 
-- `ALLaunchGuardViewController`：`@available(iOS, deprecated: 2.0)`，仅作回退保留。
-  新代码使用菜单式的 `ALLaunchGuardSafeModeViewController`
-  （`ALLaunchGuard.presentSafeModeMenu()`）。
-- `presentSafeModeUIIfNeeded(fixHandler:)`：已废弃，改用
-  `presentSafeModeMenu()` 或 `activateSafeModeWindow()`。
-- 注意：旧 VC 的修复按钮文案已**固定为“修复”、不可再配置**——原
-  `fixButtonTitle` 字段已移除，其语义迁移为菜单页底部的 `restartHint`
-  常驻重启提示（提示文案，不是按钮文案），需要自定义按钮文案的宿主
-  请迁移到菜单式页面 + 自定义 fixAction。
+- `ALLaunchGuardViewController` 与 `presentSafeModeUIIfNeeded(fixHandler:)`
+  已在 2.0 **移除**（不再以 deprecated 形式保留，引用将直接编译失败）。
+  安全模式 UI 统一为菜单式的 `ALLaunchGuardSafeModeViewController`：
+  由 `presentationStyle` 控制自动展示（`.dedicatedWindow` 独立窗口接管 /
+  `.presentOnRoot` 在宿主 rootVC 上 present），宿主也可手动调用
+  `activateSafeModeWindow()` 或 `presentSafeModeMenu()`。
+- 原 `fixHandler` 清理逻辑迁移为注册 `ALLaunchGuardFixAction`
+  （一行包装示例；`fixActions` 为空时库自动提供内置"重置安全模式"
+  兑底动作，不会出现无出口困局）：
+
+```swift
+// 1.x：旧页 fixHandler 承担清理逻辑
+// oldViewController.fixHandler = { clearCaches() }
+
+// 2.0：注册为菜单修复动作（ALLaunchGuardClosureAction 一行包装）
+ALLaunchGuard.shared.fixActions = [
+    ALLaunchGuardClosureAction(title: "清理缓存") { completion in
+        clearCaches()
+        completion(true)
+    }
+]
+```
 
 ### 3. 默认展示行为改为独立 UIWindow 接管
 

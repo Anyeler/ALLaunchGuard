@@ -326,8 +326,8 @@ public final class ALLaunchGuard {
         delegate?.launchGuardDidEnterSafeMode(self)
         #if canImport(UIKit)
         // 自动展示分流（纯函数判定，spec: safe-mode-window / design D4）：
-        // .dedicatedWindow（默认）→ 独立窗口接管；.presentOnRoot → 旧 present
-        // 路径（兼容回退）；.none → 不自动展示（宿主自行处理 UI）
+        // .dedicatedWindow（默认）→ 独立窗口接管；.presentOnRoot → 在宿主
+        // rootVC 上 present 菜单页；.none → 不自动展示（宿主自行处理 UI）
         switch Self.presentationRoute(for: _uiConfig) {
         case .none:
             break
@@ -372,7 +372,7 @@ internal enum ALLaunchGuardPresentationRoute: Equatable {
     case none
     /// 独立 UIWindow 接管（默认，spec: safe-mode-window）
     case dedicatedWindow
-    /// 在宿主 key window rootVC 上 present（旧行为兼容路径）
+    /// 在宿主 key window rootVC 上 present（root 挂载展示选项）
     case presentOnRoot
 }
 
@@ -380,7 +380,7 @@ extension ALLaunchGuard {
     /// 展示路径分流纯函数（无 UIKit 依赖，macOS/Linux 可直接单测）：
     /// - `autoPresent == false` → `.none`（与样式无关）；
     /// - 否则按 `presentationStyle` 分流：`.dedicatedWindow`（默认）/
-    ///   `.presentOnRoot`（旧 present 路径）。
+    ///   `.presentOnRoot`（在宿主 rootVC 上 present 菜单页）。
     internal static func presentationRoute(
         for config: ALLaunchGuardConfig
     ) -> ALLaunchGuardPresentationRoute {
@@ -429,10 +429,10 @@ public extension ALLaunchGuard {
 
     /// 在 key window 的 root view controller 上展示菜单式安全模式页。
     ///
-    /// 兼容回退路径（spec: safe-mode-window）：`presentationStyle == .presentOnRoot`
-    ///（旧行为）且 autoPresent 时由库在激活时自动调用，宿主也可随时手动调用。
+    /// root 挂载展示路径（spec: safe-mode-window）：`presentationStyle == .presentOnRoot`
+    /// 且 autoPresent 时由库在激活时自动调用，宿主也可随时手动调用。
     /// present 派发主队列异步执行，keyWindow 查找兼容 iOS 15（scene.keyWindow）
-    /// 与 iOS 14（windows 过滤）。默认路径（.dedicatedWindow）已改为独立
+    /// 与 iOS 14（windows 过滤）。默认路径（.dedicatedWindow）为独立
     /// UIWindow 接管（见 `activateSafeModeWindow()`）。
     ///
     /// 防重入（fix-review-findings design D3）：present 闭包内沿 rootVC 的
