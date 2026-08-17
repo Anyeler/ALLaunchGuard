@@ -542,6 +542,9 @@ MPLaunch 宿主可在任务闭包内桥接编排器的依赖图执行能力（�
 1.3.0 预告的 `runSafeModeTasks` 入口）——该能力属 mplaunch 仓库的独立
 增量，ALLaunchGuard 本身不依赖、不引用任何启动编排器。
 
+完整可运行示例见 `Examples/BasicExample`（纯 Foundation 直调）与
+`Examples/MPLaunchExample`（编排器桥接）互为对照。
+
 ---
 
 ## SwiftUI 接入
@@ -641,7 +644,10 @@ struct MyApp: App {
   `xcrun simctl spawn <udid> defaults write <bundleid> BasicExample.autoCrashRemaining -int 3`；
 - “直接进入安全模式”调试入口（DEBUG `enterSafeModeForTesting()`）；
 - 注册四个修复动作：内置清理缓存 + 内置深度清理缓存 + 自定义清理沙盒示例
-  目录 + 内置重启应用（末位约定，红色警示样式）。
+  目录 + 内置重启应用（末位约定，红色警示样式）；
+- 注册 `safeModeLaunchTasks` 最小任务演示（纯 Foundation 模拟日志初始化 +
+  一次性横幅闭环：安全模式启动执行最小任务后，修复重启回正常路径首页
+  展示一次性横幅，读后清零）。
 
 ```bash
 xcodebuild -project Examples/BasicExample/BasicExample.xcodeproj \

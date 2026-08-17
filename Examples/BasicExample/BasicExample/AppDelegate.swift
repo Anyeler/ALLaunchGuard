@@ -23,7 +23,23 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
             ALLaunchGuardRestartAction()          // 内置：重启应用（末位约定）
         ]
 
-        // 2. 安全模式门控：返回 true 表示本次启动处于安全模式，
+        // 2. 注册安全模式最小启动任务（必须先于 start()，供安全模式激活时执行）。
+        //    与 MPLaunchExample 对照：那里的任务闭包经 MainActor.assumeIsolated
+        //    桥接编排器 runSafeModeTasks；本通用示例无编排器依赖，纯 Foundation
+        //    直调（DemoSafeModeLogger，见 SafeModeLogBuffer.swift）。两个任务按
+        //    注册顺序同步执行，展示注册顺序与任务依赖语义（先初始化缓冲、
+        //    再记录事件）。任务约束见 SafeModeLogBuffer.swift 类注释。
+        ALLaunchGuard.shared.safeModeLaunchTasks = [
+            { DemoSafeModeLogger.bootstrap() },
+            {
+                DemoSafeModeLogger.log("安全模式启动：最小任务链已就绪")
+                // 演示豁免：写一次性标记驱动首页横幅闭环（spec: example-apps
+                // MODIFIED）；生产最小任务须遵守无磁盘 IO 约束（见 README）。
+                UserDefaults.standard.set(true, forKey: "BasicExample.safeModeMinimalTaskRan")
+            },
+        ]
+
+        // 3. 安全模式门控：返回 true 表示本次启动处于安全模式，
         //    跳过全部正常启动任务（不构建 window / 首页）。
         //    安全模式页面由库以独立 UIWindow 自动接管展示
         //    （uiConfig.presentationStyle 默认 .dedicatedWindow）。
@@ -39,7 +55,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
             return true
         }
 
-        // 3. 正常启动：构建 window 与首页。
+        // 4. 正常启动：构建 window 与首页。
         //    安全模式启动时，以下代码不会执行——
         //    这正是首页"启动任务清单"在安全模式下为空/不展示的原因。
         let window = UIWindow(frame: UIScreen.main.bounds)
@@ -50,7 +66,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         self.window = window
 
         #if DEBUG
-        // 4. 连续闪退演示（spec: example-apps MODIFIED / design D4）：
+        // 5. 连续闪退演示（spec: example-apps MODIFIED / design D4）：
         //    仅正常启动路径调度（安全模式路径上方已 return，不会到达）——
         //    安全模式启动不打点不计时，自动崩溃无意义且干扰修复流程。
         //    放在 window 可见后调度，保证崩溃前用户能看到首页闪现。

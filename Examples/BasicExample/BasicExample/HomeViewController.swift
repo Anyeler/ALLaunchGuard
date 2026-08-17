@@ -25,6 +25,10 @@ final class HomeViewController: UITableViewController {
 
     private let cellID = "LaunchTaskCell"
 
+    /// 安全模式最小任务一次性横幅的 UserDefaults key（与 AppDelegate 步骤 2
+    /// 注册的演示豁免标记一致）：展示后清零，不常驻
+    private static let safeModeTaskRanKey = "BasicExample.safeModeMinimalTaskRan"
+
     // MARK: - 连续闪退演示开关（DEBUG 限定）
 
     #if DEBUG
@@ -73,8 +77,19 @@ final class HomeViewController: UITableViewController {
         ])
         tableView.tableFooterView = footer
 
+        // 一次性横幅：安全模式最小任务执行过的可见证据（spec: example-apps
+        // MODIFIED）——修复重启回正常路径后展示一次，读后立即清零。
+        let showSafeModeTaskBanner = UserDefaults.standard.bool(forKey: Self.safeModeTaskRanKey)
+        if showSafeModeTaskBanner {
+            UserDefaults.standard.set(false, forKey: Self.safeModeTaskRanKey)
+        }
+
         #if DEBUG
-        setupAutoCrashDemoHeader()
+        setupAutoCrashDemoHeader(showSafeModeTaskBanner: showSafeModeTaskBanner)
+        #else
+        if showSafeModeTaskBanner {
+            tableView.tableHeaderView = makeHeaderContainer(withBannerOnly: true)
+        }
         #endif
     }
 
@@ -91,11 +106,27 @@ final class HomeViewController: UITableViewController {
     // MARK: - 连续闪退演示开关（DEBUG 限定，spec: example-apps MODIFIED）
 
     /// 首页顶部开关区：标题 + 说明文案 + UISwitch（状态绑定 remaining > 0；
-    /// 开启调 arm() 置 3，关闭调 disarm() 清零）。
+    /// 开启调 arm() 置 3，关闭调 disarm() 清零）。当 showSafeModeTaskBanner
+    /// 为 true 时，顶部叠加安全模式最小任务一次性横幅。
     #if DEBUG
-    private func setupAutoCrashDemoHeader() {
-        let header = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: 132))
+    private func setupAutoCrashDemoHeader(showSafeModeTaskBanner: Bool) {
+        let bannerHeight: CGFloat = showSafeModeTaskBanner ? 72 : 0
+        let header = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: 132 + bannerHeight))
         header.backgroundColor = .secondarySystemBackground
+
+        var topAnchor = header.topAnchor
+        if showSafeModeTaskBanner {
+            let banner = makeSafeModeTaskBannerLabel()
+            header.addSubview(banner)
+            NSLayoutConstraint.activate([
+                banner.topAnchor.constraint(equalTo: header.topAnchor, constant: 12),
+                banner.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 24),
+                banner.trailingAnchor.constraint(
+                    equalTo: header.trailingAnchor, constant: -24),
+                banner.heightAnchor.constraint(greaterThanOrEqualToConstant: 40),
+            ])
+            topAnchor = banner.bottomAnchor
+        }
 
         let titleLabel = UILabel()
         titleLabel.text = "模拟连续启动闪退"
@@ -119,7 +150,7 @@ final class HomeViewController: UITableViewController {
         header.addSubview(autoCrashSwitch)
 
         NSLayoutConstraint.activate([
-            titleLabel.topAnchor.constraint(equalTo: header.topAnchor, constant: 16),
+            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 16),
             titleLabel.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 24),
             titleLabel.trailingAnchor.constraint(
                 equalTo: autoCrashSwitch.leadingAnchor, constant: -12),
@@ -146,6 +177,40 @@ final class HomeViewController: UITableViewController {
         } else {
             BasicExampleCrashSimulator.shared.disarm()
         }
+    }
+    #endif
+
+    // MARK: - 安全模式最小任务一次性横幅（spec: example-apps MODIFIED）
+
+    /// 横幅样式：绿色底 + 白字居中，与首页列表勾号色调一致
+    private func makeSafeModeTaskBannerLabel() -> UILabel {
+        let label = UILabel()
+        label.text = "上次安全模式启动：最小任务已执行（示例）"
+        label.font = .systemFont(ofSize: 14, weight: .medium)
+        label.textColor = .white
+        label.textAlignment = .center
+        label.numberOfLines = 0
+        label.backgroundColor = .systemGreen
+        label.layer.cornerRadius = 10
+        label.layer.masksToBounds = true
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }
+
+    #if !DEBUG
+    /// Release 下无连续闪退演示开关区：横幅独立占据 tableHeaderView
+    private func makeHeaderContainer(withBannerOnly: Bool) -> UIView {
+        let container = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: 64))
+        container.backgroundColor = .secondarySystemBackground
+        let banner = makeSafeModeTaskBannerLabel()
+        container.addSubview(banner)
+        NSLayoutConstraint.activate([
+            banner.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
+            banner.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 24),
+            banner.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -24),
+            banner.heightAnchor.constraint(greaterThanOrEqualToConstant: 40),
+        ])
+        return container
     }
     #endif
 
