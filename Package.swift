@@ -23,5 +23,5 @@ let package = Package(
             path: "Tests/ALLaunchGuardTests"
         )
     ],
-    swiftLanguageVersions: [.v6]
+    swiftLanguageModes: [.v6]
 )
