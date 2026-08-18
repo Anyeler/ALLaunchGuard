@@ -10,8 +10,8 @@ import Foundation
 /// 调用 `disarm()` 清零（进入安全模式即结束演示，避免 remaining 残留
 /// 导致修复重启后再多崩一次）；行为与 arm 值、阈值解耦，任意阈值下一致。
 ///
-/// 用法：首页开关开启 → `arm()` 置剩余自动崩溃次数为 3；AppDelegate 在
-/// 正常启动路径（`ALLaunchGuard.start()` 返回 false）调用
+/// 用法：首页开关开启 → `arm()` 置剩余自动崩溃次数为 3；SceneDelegate 在
+/// 正常启动路径（`ALLaunchGuard.start()` 返回 false，window 可见后）调用
 /// `scheduleAutoCrashIfEnabled()`——剩余次数 > 0 时先递减持久化，再在
 /// 约 1 秒后（5 秒存活窗口内）fatalError 崩溃。
 final class BasicExampleCrashSimulator {
@@ -57,7 +57,8 @@ final class BasicExampleCrashSimulator {
 
     /// 启动时调度自动崩溃：剩余 > 0 → 先递减持久化 → 约 1 秒后 fatalError。
     ///
-    /// 注意：必须在 `ALLaunchGuard.start()` 返回 false（正常启动）后调用；
+    /// 注意：必须在正常启动路径（`ALLaunchGuard.start()` 返回 false，
+    /// SceneDelegate 非安全模式分支）且 window 可见后调用；
     /// 安全模式启动不打点不计时，调度崩溃无意义且会干扰修复流程。
     /// 递减必须先行持久化——fatalError 无 unwind，进程即刻终止。
     /// 1 秒延迟保证崩溃发生在 5 秒存活窗口内（计数保留）且首页 UI 可见。

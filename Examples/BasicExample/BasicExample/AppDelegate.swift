@@ -4,8 +4,6 @@ import ALLaunchGuard
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
 
-    var window: UIWindow?
-
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
@@ -39,10 +37,13 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
             },
         ]
 
-        // 3. 安全模式门控：返回 true 表示本次启动处于安全模式，
-        //    跳过全部正常启动任务（不构建 window / 首页）。
-        //    安全模式页面由库以独立 UIWindow 自动接管展示
-        //    （uiConfig.presentationStyle 默认 .dedicatedWindow）。
+        // 3. 安全模式门控：返回 true 表示本次启动处于安全模式。
+        //    Scene 生命周期下 didFinishLaunching 返回后 scene 仍会连接，
+        //    SceneDelegate.willConnectTo 以 isInSafeMode 短路（不构建
+        //    window/首页）；安全模式页面由库以独立 UIWindow 自动接管展示
+        //    （uiConfig.presentationStyle 默认 .dedicatedWindow，库经
+        //    willConnect 观察者以 UIWindow(windowScene:) 挂载）。
+        //    正常启动路径的 window 构建与首页展示已迁入 SceneDelegate。
         if ALLaunchGuard.shared.start() {
             #if DEBUG
             // 收尾决策：进入安全模式即结束连续闪退演示——清零剩余自动崩溃
@@ -54,24 +55,6 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
             #endif
             return true
         }
-
-        // 4. 正常启动：构建 window 与首页。
-        //    安全模式启动时，以下代码不会执行——
-        //    这正是首页"启动任务清单"在安全模式下为空/不展示的原因。
-        let window = UIWindow(frame: UIScreen.main.bounds)
-        // 包一层 UINavigationController：HomeViewController 的“直接进入
-        // 安全模式”DEBUG 入口配置在 navigationItem 上，需导航栏承载才可见。
-        window.rootViewController = UINavigationController(rootViewController: HomeViewController())
-        window.makeKeyAndVisible()
-        self.window = window
-
-        #if DEBUG
-        // 5. 连续闪退演示（spec: example-apps MODIFIED / design D4）：
-        //    仅正常启动路径调度（安全模式路径上方已 return，不会到达）——
-        //    安全模式启动不打点不计时，自动崩溃无意义且干扰修复流程。
-        //    放在 window 可见后调度，保证崩溃前用户能看到首页闪现。
-        BasicExampleCrashSimulator.shared.scheduleAutoCrashIfEnabled()
-        #endif
 
         return true
     }
