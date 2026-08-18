@@ -220,7 +220,9 @@ public final class ALLaunchGuardRestartAction: ALLaunchGuardFixAction {
 
     /// 进程终止行为（默认 `exit(0)`）：测试可注入替换（非公共 API，
     /// `@testable` 可见），生产语义不可经公共 API 更改。
-    internal var exitHandler: () -> Void = { exit(0) }
+    /// `@Sendable`（upgrade-swift-6-beta）：消除下方主队列派发捕获
+    /// self 的 sending 诊断；测试注入侧同样须提供 @Sendable 闭包。
+    internal var exitHandler: @Sendable () -> Void = { exit(0) }
 
     /// - Parameters:
     ///   - title: 菜单标题（默认“重启应用”）
@@ -241,7 +243,10 @@ public final class ALLaunchGuardRestartAction: ALLaunchGuardFixAction {
         // 先后顺序不得调换：依赖主队列 FIFO 保证编排层的
         // DispatchQueue.main.async { reset() … } 先执行（粘滞标记
         // 清除先于进程终止），否则重启后仍会因粘滞标记再进安全模式。
-        DispatchQueue.main.async { self.exitHandler() }
+        // 快照捕获 exitHandler（upgrade-swift-6-beta）：避免闭包捕获 self；
+        // 禁止把此处 Task 化——Task 调度不保证与主队列 FIFO 的相对先后，
+        // 会破坏上述 load-bearing 时序。
+        DispatchQueue.main.async { [exitHandler] in exitHandler() }
     }
 }
 

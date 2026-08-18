@@ -16,7 +16,12 @@ import UIKit
 ///     // Show safe mode UI
 /// }
 /// ```
-public final class ALLaunchGuard {
+/// `@unchecked Sendable`（upgrade-swift-6-beta）：外部同步依据——stateLock 已
+/// 串行化全部自身可变状态与锁内 storage 读写（harden-thread-safety design D1，
+/// TSan 全绿 + 8 路 hammer 锚定）；锁外副作用（delegate / 最小任务 / UI 安装）
+/// 各自有主队列 / 锁外纪律约束。新增可变状态 MUST 纳入 stateLock 保护，
+/// 否则本标注失效。否决 @MainActor 单例的依据见 upgrade-swift-6-beta design D1。
+public final class ALLaunchGuard: @unchecked Sendable {
 
     // MARK: - Public
 
@@ -429,14 +434,21 @@ public final class ALLaunchGuard {
         _ action: ALLaunchGuardFixAction,
         completion: ((Bool) -> Void)? = nil
     ) {
+        // upgrade-swift-6-beta：本方法为任务隔离上下文，action/completion 经
+        // 主队列派发跨隔离发送，在新编译器下从计划预期的 warning 升级为
+        // sending error；以 nonisolated(unsafe) 快照捕获作最小收口（运行时
+        // 语义不变：completion 统一主队列收口、action 生命周期与单例同长），
+        // 根治（协议族 Sendable 化）留待转正 3.0 路线图（design D2）。
+        nonisolated(unsafe) let sentAction = action
+        nonisolated(unsafe) let sentCompletion = completion
         action.perform { [weak self] success in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 if success {
                     self.reset()
                 }
-                self.delegate?.launchGuard(self, didFinishFixAction: action, success: success)
-                completion?(success)
+                self.delegate?.launchGuard(self, didFinishFixAction: sentAction, success: success)
+                sentCompletion?(success)
             }
         }
     }
@@ -459,13 +471,17 @@ public final class ALLaunchGuard {
     ///
     /// 下次启动裁决发现该标记时，本次死亡不计为启动闪退
     /// （覆盖系统回收 / 上滑强杀后台 / 后台 OOM 场景）。
+    /// storage 写入经 withStateLock 串行化（upgrade-swift-6-beta 竞态收口）：
+    /// 与任意线程锁内读的 shouldEnterSafeMode 同锁保护，无撕裂读。
     internal func handleDidEnterBackground() {
-        storage.lastLaunchDiedInBackground = true
+        withStateLock { storage.lastLaunchDiedInBackground = true }
     }
 
     /// 应用正常终止回调：兜底清零计数（与存活确认共存）。
+    /// storage 写入经 withStateLock 串行化（upgrade-swift-6-beta 竞态收口，
+    /// 同 handleDidEnterBackground 依据）。
     internal func handleWillTerminate() {
-        storage.consecutiveCrashCount = 0
+        withStateLock { storage.consecutiveCrashCount = 0 }
     }
 
     // MARK: - Internal helpers

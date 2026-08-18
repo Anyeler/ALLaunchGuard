@@ -423,6 +423,31 @@ final class ALLaunchGuardFixActionTests: XCTestCase {
 
     // MARK: 内置重启动作（spec: fix-actions ADDED——内置重启动作，design D1）
 
+    /// exitHandler 记录器（upgrade-swift-6-beta）：exitHandler 现为 @Sendable
+    /// 闭包，不得捕获可变局部变量；以锁保护的轻量记录器承接（记录点实际均
+    /// 在主队列执行，锁仅为满足编译的并发安全标注）。
+    private final class RestartExitRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _order: [String] = []
+        private var _exitCount = 0
+        func append(_ event: String) {
+            lock.lock(); defer { lock.unlock() }
+            _order.append(event)
+        }
+        func recordExit() {
+            lock.lock(); defer { lock.unlock() }
+            _exitCount += 1
+        }
+        var order: [String] {
+            lock.lock(); defer { lock.unlock() }
+            return _order
+        }
+        var exitCount: Int {
+            lock.lock(); defer { lock.unlock() }
+            return _exitCount
+        }
+    }
+
     /// 内置重启动作默认元数据：中文标题 + arrow.clockwise 图标 + 破坏性标记
     func testRestartActionDefaultMetadata() {
         let action = ALLaunchGuardRestartAction()
@@ -447,12 +472,12 @@ final class ALLaunchGuardFixActionTests: XCTestCase {
         let guard_ = makeGuardInSafeMode(storage: storage, delegate: delegate)
 
         let action = ALLaunchGuardRestartAction()
-        var order: [String] = []   // 两个记录点均在主队列执行，无竞争风险
-        var exitCount = 0
+        // 两个记录点均在主队列执行，无竞争风险；recorder 见类型说明
+        let recorder = RestartExitRecorder()
         let exitExp = expectation(description: "exitHandler invoked")
         action.exitHandler = {
-            exitCount += 1
-            order.append("exitHandler")
+            recorder.recordExit()
+            recorder.append("exitHandler")
             exitExp.fulfill()
         }
 
@@ -462,13 +487,13 @@ final class ALLaunchGuardFixActionTests: XCTestCase {
             // 编排层 completion 在 reset() 之后回调：此刻粘滞标记应已清零
             XCTAssertFalse(storage.safeModeActive)
             XCTAssertEqual(storage.consecutiveCrashCount, 0)
-            order.append("reset")
+            recorder.append("reset")
             exp.fulfill()
         }
         wait(for: [exp, exitExp], timeout: 2)
 
-        XCTAssertEqual(order, ["reset", "exitHandler"])   // reset 生效先于进程终止
-        XCTAssertEqual(exitCount, 1)                        // exitHandler 恰好一次
+        XCTAssertEqual(recorder.order, ["reset", "exitHandler"])   // reset 生效先于进程终止
+        XCTAssertEqual(recorder.exitCount, 1)                        // exitHandler 恰好一次
         XCTAssertFalse(guard_.isInSafeMode)
         XCTAssertEqual(delegate.exitCount, 1)
     }

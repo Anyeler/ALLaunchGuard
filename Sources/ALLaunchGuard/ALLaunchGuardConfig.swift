@@ -2,7 +2,9 @@ import Foundation
 
 /// 安全模式界面的展示样式（spec: safe-mode-window）。
 /// String raw 值便于调试与日志埋点（design D4）。
-public enum ALLaunchGuardPresentationStyle: String {
+/// `Sendable`（upgrade-swift-6-beta）：v6 语言模式下公共枚举不再隐式
+/// 合成 Sendable，显式标注（String 枚举平凡 Sendable，零语义变化）。
+public enum ALLaunchGuardPresentationStyle: String, Sendable {
     /// 独立 UIWindow 接管显示（默认）：不依赖宿主是否构建了 window/root VC——
     /// 宿主跳过启动流程时此窗为唯一界面；宿主漏分流时因更高 windowLevel
     /// 形成覆盖兜底（双保险）。
@@ -13,7 +15,10 @@ public enum ALLaunchGuardPresentationStyle: String {
 }
 
 /// Configuration for the built-in safe-mode UI page.
-public struct ALLaunchGuardConfig {
+///
+/// `Sendable`（upgrade-swift-6-beta）：成员全部为值类型 / Sendable，
+/// 编译器可核验；消除 `static let default` 的并发安全诊断。
+public struct ALLaunchGuardConfig: Sendable {
 
     // MARK: - Properties
 
@@ -94,7 +99,9 @@ import Foundation
 /// Fallback colour type when UIKit is not available (e.g. unit-test targets on Linux).
 public typealias ALColor = ALPlaceholderColor
 
-public final class ALPlaceholderColor {
+/// 无状态类，`Sendable`（upgrade-swift-6-beta）：消除非 UIKit 平台
+///（macOS 测试专属）`static let systemOrange` 的并发安全诊断。
+public final class ALPlaceholderColor: Sendable {
     public static let systemOrange = ALPlaceholderColor()
     public init() {}
 }

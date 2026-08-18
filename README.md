@@ -757,6 +757,23 @@ present，要求宿主已构建自身界面）——展示的页面仍是 2.0 �
 
 ---
 
+## Swift 6 语言模式 beta（`beta/swift-6` 分支）
+
+`beta/swift-6` 为长期 beta 分支（基于 main，不合入 main），一步切换
+Swift 6 语言模式（swift-tools 6.0、`swiftLanguageVersions` v6），
+podspec 版本 `2.2.0-beta.1` 仅为分支内占位（不打 tag、不 pod trunk push）。
+
+- **工具链要求**：消费者需 Xcode 16+（Swift 6 编译器）；main 分支
+  2.1.0 继续服务旧工具链，两条线并行互不影响。
+- **beta 接受态**：约 21 个并发相关 warning 为已知接受态（窗口协调器
+  跨隔离 UIKit 访问等），不影响运行正确性——`swift test` 65/65 全绿、
+  TSan 无竞争，均有测试锚定。
+- **转正计划**：转正时向 main 开 PR，届时按 3.0 破坏性版本处理协议族
+  Sendable 化与协调器 `@MainActor` 化；期间 main → beta 同步一律用
+  merge（禁 rebase/force-push）。
+
+---
+
 ## License
 
 ALLaunchGuard 以 MIT 许可发布，详见 [LICENSE](LICENSE)。

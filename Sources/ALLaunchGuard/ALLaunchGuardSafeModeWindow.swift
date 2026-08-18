@@ -45,7 +45,13 @@ import UIKit
 /// 不存在该常量（didConnect 系 UIScreen 的通知），scene 连接通知的实际
 /// API 为 `UIScene.willConnectNotification`（iOS 13+），语义与 spec 意图
 /// 一致，此处按实际 API 实现。
-internal final class ALLaunchGuardSafeModeWindowCoordinator {
+/// `@unchecked Sendable`（upgrade-swift-6-beta）：外部同步依据——install 内
+/// 非主线程自 hop 主队列 + 主线程断言（harden-thread-safety design D4），
+/// 跨隔离发送 self 的全部落点（自 hop 派发 / 主队列通知回调 / 超时任务）
+/// 最终在主队列串行执行，UIKit 状态无并发访问。新增状态或调用点 MUST
+/// 维持该结构保证，否则本标注失效。协调器内跨隔离 UIKit 访问警告为
+/// beta 接受态（转正时协调器 @MainActor 化，见 upgrade-swift-6-beta design D2）。
+internal final class ALLaunchGuardSafeModeWindowCoordinator: @unchecked Sendable {
 
     /// scene 等待超时时长（秒）：配置了 scene manifest 但 install 后超过
     /// 该时长仍未挂载，则以全屏 frame 降级创建窗口（极端异常兜底：scene

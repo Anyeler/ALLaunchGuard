@@ -18,11 +18,13 @@ final class LegacyStorage: ALLaunchGuardStorage {
 
 // MARK: - Fake schedulers（存活计时注入）
 
-/// 立即执行调度器：模拟存活计时立即到期（进程存活满阈值时长）
-let immediateScheduler: (@escaping () -> Void) -> Void = { work in work() }
+/// 立即执行调度器：模拟存活计时立即到期（进程存活满阈值时长）。
+/// 顶层 func 形式（upgrade-swift-6-beta）：非 Sendable 函数类型的全局
+/// 常量在 v6 语言模式下升级为 error，函数声明无此问题且语义等价。
+func immediateScheduler(_ work: @escaping () -> Void) { work() }
 
 /// no-op 调度器：模拟计时无机会执行（进程在阈值时长内死亡）
-let noOpScheduler: (@escaping () -> Void) -> Void = { _ in }
+func noOpScheduler(_ work: @escaping () -> Void) { _ = work }
 
 // MARK: - Mock delegate
 
