@@ -4,7 +4,8 @@ import ALLaunchGuard
 /// 首页：展示"本次启动已执行的启动任务"清单与调试入口。
 ///
 /// 注意：本 VC 仅在正常启动路径下被构建——
-/// 安全模式启动时 AppDelegate 直接 return，本页不会出现。
+/// 安全模式启动时 SceneDelegate 以 isInSafeMode 门控短路（不构建
+/// window/rootVC），本页不会出现。
 ///
 /// DEBUG 限定入口（spec: example-apps MODIFIED）：
 /// - 顶部"模拟连续启动闪退"开关：开启后接下来几次启动在存活窗口内

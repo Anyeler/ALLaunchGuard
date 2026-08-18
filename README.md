@@ -634,7 +634,10 @@ struct MyApp: App {
 
 `Examples/BasicExample/`：通用门控范式演示。
 
-- 经典 AppDelegate 生命周期（无 SceneDelegate），本地 SPM 包引用仓库根 `../../`；
+- SceneDelegate 生命周期（iOS 26 适配），本地 SPM 包引用仓库根 `../../`；
+  安全模式门控仍在 `didFinishLaunching` 首行（`start()`），scene 连接后由
+  `SceneDelegate` 以 `isInSafeMode` 短路（不构建 window/首页），安全模式
+  独立窗口由库经 willConnect 观察者挂载接管；
 - 首页展示“本次启动已执行的启动任务”清单（安全模式下不会构建）；
 - “模拟启动闪退”按钮（DEBUG `fatalError`，连续 3 次重启后触发安全模式）；
 - “模拟连续启动闪退”开关（DEBUG）：开启后每次启动约 1 秒自动崩溃并递减剩余
