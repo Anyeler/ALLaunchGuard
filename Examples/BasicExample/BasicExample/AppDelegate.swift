@@ -41,8 +41,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
 
         // 3. 安全模式门控：返回 true 表示本次启动处于安全模式，
         //    跳过全部正常启动任务（不构建 window / 首页）。
-        //    安全模式页面由库以独立 UIWindow 自动接管展示
-        //    （uiConfig.presentationStyle 默认 .dedicatedWindow）。
+        //    安全模式页面由库以独立 UIWindow 自动接管展示。
         if ALLaunchGuard.shared.start() {
             #if DEBUG
             // 收尾决策：进入安全模式即结束连续闪退演示——清零剩余自动崩溃

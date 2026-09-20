@@ -2,7 +2,7 @@
 
 ## Purpose
 
-定义安全模式界面接管能力：当检测到启动崩溃循环进入安全模式且宿主跳过正常启动流程时，库以独立 UIWindow 接管显示安全模式菜单页，覆盖或替代任何既有界面，并具备 scene 就绪等待与旧展示路径回退，确保用户始终能看到修复入口。
+定义安全模式界面接管能力：当检测到启动崩溃循环进入安全模式且宿主跳过正常启动流程时，库以独立 UIWindow 接管显示安全模式菜单页，覆盖或替代任何既有界面，并具备 scene 就绪等待，确保用户始终能看到修复入口。
 
 ## Requirements
 ### Requirement: 独立窗口接管显示
@@ -36,11 +36,15 @@
 - **THEN** 窗口以屏幕 bounds 立即创建并显示，无秒级黑屏等待
 
 ### Requirement: 展示样式配置
-配置对象 SHALL 提供展示样式枚举：专用窗口（默认）或在宿主 root 上 present（旧行为）；安全模式激活的自动展示 SHALL 按该配置分流；present 回退路径 SHALL 保留可用。
+安全模式激活且自动展示开启时，系统 SHALL 始终以独立 UIWindow 接管安全模式界面。配置对象不得提供在宿主 root 上 present 的展示样式，库不得保留该展示路径。
+
+#### Scenario: 自动展示安全模式
+- **WHEN** 安全模式激活且 autoPresent 为 true
+- **THEN** 系统创建独立 UIWindow 接管界面，不依赖宿主是否已经构建 root view controller
 
 #### Scenario: 配置回退旧样式
-- **WHEN** 宿主配置 presentationStyle 为 .presentOnRoot 且安全模式激活（autoPresent 为 true）
-- **THEN** 采用在宿主 key window rootVC 上 present 的旧路径（兼容行为）
+- **WHEN** 宿主尝试配置已移除的 present-on-root 展示样式
+- **THEN** 该展示样式不再是库的公开 API，宿主必须迁移至独立 UIWindow 接管
 
 ### Requirement: 显式接管入口与窗口生命周期
 系统 SHALL 提供显式接管方法（如宿主在 return 前手动调用）；窗口 SHALL 被强持有防释放；安全模式激活期间窗口 MUST NOT 自动关闭（等待用户执行修复并手动重启应用）；修复动作执行不依赖窗口状态。
@@ -53,9 +57,9 @@
 - **WHEN** 安全模式页停留期间（无论是否已有动作修复成功）
 - **THEN** 窗口保持可见直到进程结束（用户重启），不自动 dismiss
 
-### Requirement: iOS 14 兼容
-窗口与 scene 相关代码 MUST 仅使用 iOS 14 可用 API（UIScene.willConnectNotification、UIWindowScene 常规 API），SHALL 通过 iOS destination 编译验证。
+### Requirement: iOS 15 窗口 API 基线
+窗口与 scene 相关代码 MUST 以 iOS 15 作为最低可用版本，并 SHALL 通过 iOS 15 deployment target 编译验证。独立窗口展示路径不得保留用于 iOS 14 的运行时 API 可用性分支。
 
-#### Scenario: iOS 14 编译
-- **WHEN** 以 iOS 14 deployment target 编译 UIKit 分支
-- **THEN** 编译通过，无 availability 错误
+#### Scenario: iOS 15 deployment target 编译
+- **WHEN** 以 iOS 15 deployment target 编译 UIKit 分支
+- **THEN** 编译通过，且不存在用于 iOS 14 的运行时 API 可用性分支

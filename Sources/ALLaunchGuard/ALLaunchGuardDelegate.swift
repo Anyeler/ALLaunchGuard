@@ -19,14 +19,3 @@ public protocol ALLaunchGuardDelegate: AnyObject {
         success: Bool
     )
 }
-
-/// Default empty implementations so conforming types only override what they need.
-public extension ALLaunchGuardDelegate {
-    func launchGuardDidEnterSafeMode(_ guard: ALLaunchGuard) {}
-    func launchGuardDidExitSafeMode(_ guard: ALLaunchGuard) {}
-    func launchGuard(
-        _ launchGuard: ALLaunchGuard,
-        didFinishFixAction action: ALLaunchGuardFixAction,
-        success: Bool
-    ) {}
-}

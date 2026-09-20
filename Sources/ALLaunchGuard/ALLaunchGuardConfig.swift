@@ -1,17 +1,5 @@
 import Foundation
 
-/// 安全模式界面的展示样式（spec: safe-mode-window）。
-/// String raw 值便于调试与日志埋点（design D4）。
-public enum ALLaunchGuardPresentationStyle: String {
-    /// 独立 UIWindow 接管显示（默认）：不依赖宿主是否构建了 window/root VC——
-    /// 宿主跳过启动流程时此窗为唯一界面；宿主漏分流时因更高 windowLevel
-    /// 形成覆盖兜底（双保险）。
-    case dedicatedWindow
-    /// 在宿主 key window rootVC 上 present（旧行为兼容路径）：宿主必须已构建
-    /// 自身界面，否则无处可挂。
-    case presentOnRoot
-}
-
 /// Configuration for the built-in safe-mode UI page.
 public struct ALLaunchGuardConfig {
 
@@ -52,12 +40,6 @@ public struct ALLaunchGuardConfig {
     /// Defaults to `true`.
     public var autoPresent: Bool
 
-    /// 安全模式激活后自动展示界面采用的样式（仅 `autoPresent == true` 生效）。
-    ///
-    /// BREAKING (2.0.0): 默认 `.dedicatedWindow`（独立窗口接管），取代旧的
-    /// present-on-root 默认行为；需要旧行为的宿主显式配置 `.presentOnRoot`。
-    public var presentationStyle: ALLaunchGuardPresentationStyle
-
     // MARK: - Init
 
     public init(
@@ -67,8 +49,7 @@ public struct ALLaunchGuardConfig {
         restartButtonTitle: String = "重启应用",
         allowRestartExit: Bool = true,
         tintColor: ALColor = .systemOrange,
-        autoPresent: Bool = true,
-        presentationStyle: ALLaunchGuardPresentationStyle = .dedicatedWindow
+        autoPresent: Bool = true
     ) {
         self.title = title
         self.message = message
@@ -77,7 +58,6 @@ public struct ALLaunchGuardConfig {
         self.allowRestartExit = allowRestartExit
         self.tintColor = tintColor
         self.autoPresent = autoPresent
-        self.presentationStyle = presentationStyle
     }
 
     /// Default configuration.

@@ -1,7 +1,7 @@
 # ALLaunchGuard
 
 [![Swift 5.0+](https://img.shields.io/badge/Swift-5.0%2B-orange)](https://swift.org)
-[![iOS 14.0+](https://img.shields.io/badge/iOS-14.0%2B-blue)](https://developer.apple.com/ios/)
+[![iOS 15.0+](https://img.shields.io/badge/iOS-15.0%2B-blue)](https://developer.apple.com/ios/)
 [![SPM compatible](https://img.shields.io/badge/SPM-compatible-brightgreen)](https://swift.org/package-manager/)
 [![CocoaPods compatible](https://img.shields.io/badge/CocoaPods-compatible-brightgreen)](https://cocoapods.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -12,7 +12,7 @@ ALLaunchGuard 是一个 iOS 启动安全模式库：通过**打点法**（预支
 
 - 判定核心：`start()` 状态机返回 `Bool`（进入安全模式返回 `true`）
 - 修复编排：`fixActions: [ALLaunchGuardFixAction]` 菜单数据源 + `perform(_:completion:)` 统一编排
-- 界面接管：`presentationStyle` 默认 `.dedicatedWindow`（独立 UIWindow，不依赖宿主是否构建界面）
+- 界面接管：独立 UIWindow 自动接管（不依赖宿主是否构建界面）
 - 内置动作：清缓存、深度清理缓存、重置安全模式、重启应用与闭包包装（详见 FixAction 章节）
 - 生命周期回调：`ALLaunchGuardDelegate`（进入 / 退出 / 修复完成）
 
@@ -22,7 +22,7 @@ ALLaunchGuard 是一个 iOS 启动安全模式库：通过**打点法**（预支
 
 | 平台 | 最低版本 |
 |------|----------|
-| iOS  | 14.0     |
+| iOS  | 15.0     |
 | Swift | 5.0     |
 
 ---
@@ -204,7 +204,7 @@ iOS 15/16 存在预热执行 bug：系统预热启动偶发会执行到 `didFini
 - **自然复位**：任何一次真实启动存活满 `survivalTimeout`（默认 5 秒），
   计数自动清零，预热残留计数不会永久累积；
 - **iOS 17+**：官方修复了该 bug（预热不执行 `didFinishLaunching`），
-  无此风险；iOS 14 及以下预热不执行 app 代码，同样无此风险。
+  无此风险。
 
 ---
 
@@ -229,10 +229,9 @@ iOS 15/16 存在预热执行 bug：系统预热启动偶发会执行到 `didFini
 | `message` | `String` | *(见下方默认值)* | 标题下方正文 |
 | `restartHint` | `String` | `"修复完成后，请退出应用重新打开"` | 底部常驻重启提示；任一修复成功后强调展示 |
 | `restartButtonTitle` | `String` | `"重启应用"` | 修复成功后展示的一键重启按钮文案（见下方 exit(0) 审核说明） |
-| `allowRestartExit` | `Bool` | `true` | 是否允许修复成功后展示“重启应用”按钮；置 `false` 恒不展示，回退纯文字提示旧行为 |
+| `allowRestartExit` | `Bool` | `true` | 是否允许修复成功后展示“重启应用”按钮；置 `false` 时恒不展示 |
 | `tintColor` | `UIColor` | `.systemOrange` | 图标 / 强调色 |
 | `autoPresent` | `Bool` | `true` | 安全模式激活时是否自动展示界面 |
-| `presentationStyle` | `ALLaunchGuardPresentationStyle` | `.dedicatedWindow` | 自动展示样式（见下） |
 
 `message` 默认值：
 
@@ -240,13 +239,6 @@ iOS 15/16 存在预热执行 bug：系统预热启动偶发会执行到 `didFini
 检测到应用连续启动异常，已进入安全模式。
 请在下方选择修复项进行修复，完成后重启应用。
 ```
-
-`presentationStyle` 取值：
-
-| 样式 | 行为 |
-|------|------|
-| `.dedicatedWindow`（默认） | 独立 UIWindow 接管：不依赖宿主是否构建 window/rootVC，宿主漏分流时因更高 windowLevel 形成覆盖兜底 |
-| `.presentOnRoot` | 旧版兼容：在宿主 key window rootVC 上 present（宿主必须已构建界面） |
 
 配置示例：
 
@@ -256,10 +248,9 @@ config.title = "启动出现问题"
 config.message = "应用连续多次启动异常，已进入安全模式。"
 config.restartHint = "修复完成后请重启应用"
 config.restartButtonTitle = "重启应用"        // 默认值；一键重启按钮文案
-config.allowRestartExit = true                 // 默认值；false 隐藏按钮回退纯提示
+config.allowRestartExit = true                 // 默认值；false 隐藏重启按钮
 config.tintColor = .systemRed
-config.autoPresent = true                     // 默认即 true
-config.presentationStyle = .dedicatedWindow   // 默认即窗口接管
+config.autoPresent = true                      // 默认即 true；自动采用独立窗口接管
 ALLaunchGuard.shared.uiConfig = config
 ALLaunchGuard.shared.start()
 ```
@@ -269,15 +260,15 @@ ALLaunchGuard.shared.start()
 修复成功后的“重启应用”按钮通过 `exit(0)` 终止进程——iOS 不存在真正的
 热重启，业界安全模式实现（如微信“重启微信”）均为终止进程方案，多数
 大厂安全模式均有此先例，风险较低。但主动退出 API 历来存在审核争议，
-审核敏感的宿主可置 `allowRestartExit = false` 隐藏按钮，回退纯文字
-提示旧行为。行为约束（两种配置下均成立）：
+审核敏感的宿主可置 `allowRestartExit = false` 隐藏按钮，仅保留文字提示。
+行为约束（两种配置下均成立）：
 
 - 未修复成功前按钮恒不展示（此时重启会再次进入安全模式，无意义且误导）；
 - 点击后必弹系统 Alert 二次确认才终止进程（防误触，亦为宿主可感知的行为锚点）；
 - 修复流程本身不会自动关闭页面或自动调用 exit——重启决策始终交给用户。
 
 `autoPresent = false` 时，安全模式激活后不展示任何界面，宿主可自行调用
-`activateSafeModeWindow()`（窗口接管）或 `presentSafeModeMenu()`（present 路径）。
+`activateSafeModeWindow()` 接管窗口。
 
 ---
 
@@ -405,30 +396,14 @@ Keychain / 文件 / 数据库等宿主后端：
 
 ```swift
 public protocol ALLaunchGuardStorage: AnyObject {
-    var consecutiveCrashCount: Int { get set }           // 连续闪退计数（1.x 即有）
-    var lastLaunchMarkUptime: TimeInterval? { get set }  // 上次启动 uptime 打点（2.0 新增）
-    var lastLaunchDiedInBackground: Bool { get set }     // 上次会话是否进过后台（2.0 新增）
-    var safeModeActive: Bool { get set }                 // 安全模式粘滞标记（2.0 新增）
+    var consecutiveCrashCount: Int { get set }           // 连续闪退计数
+    var lastLaunchMarkUptime: TimeInterval? { get set }  // 上次启动 uptime 打点
+    var lastLaunchDiedInBackground: Bool { get set }     // 上次会话是否进过后台
+    var safeModeActive: Bool { get set }                 // 安全模式粘滞标记
 }
 ```
 
-### 向后兼容
-
-2.0 新增的三个字段在协议扩展中提供了 no-op 默认实现（读取返回 `nil` /
-`false`，写入被忽略）——只实现了 `consecutiveCrashCount` 的 1.x 自定义
-存储**零改动即可编译**，判定降级为纯计数模式。
-
-### 降级后果（no-op 字段未真正持久化时失去的防护）
-
-| 未持久化字段 | 降级后果 |
-|------|------|
-| `safeModeActive` | **粘滞防护失效**：安全模式标记不跨启动保留，杀进程重启即可绕过安全模式（回到纯计数判定） |
-| `lastLaunchDiedInBackground` | 后台死亡误判防护失效：系统回收 / 上滑强杀后台 / 后台 OOM 会被累计为闪退 |
-| `lastLaunchMarkUptime` | 设备重启误判防护失效：重启导致的进程终止会被累计为闪退 |
-
-### 1.x 自定义存储升级示例
-
-补齐三个新字段即可恢复完整防护（以序列化写入宿主后端为例）：
+自定义存储必须完整实现以上四个字段，才能保持后台死亡、设备重启与粘滞安全模式的完整防护。示例：
 
 ```swift
 final class KeychainLaunchGuardStorage: ALLaunchGuardStorage {
@@ -699,10 +674,9 @@ config.restartHint = "修复完成后，请退出应用重新打开"
 
 - `ALLaunchGuardViewController` 与 `presentSafeModeUIIfNeeded(fixHandler:)`
   已在 2.0 **移除**（不再以 deprecated 形式保留，引用将直接编译失败）。
-  安全模式 UI 统一为菜单式的 `ALLaunchGuardSafeModeViewController`：
-  由 `presentationStyle` 控制自动展示（`.dedicatedWindow` 独立窗口接管 /
-  `.presentOnRoot` 在宿主 rootVC 上 present），宿主也可手动调用
-  `activateSafeModeWindow()` 或 `presentSafeModeMenu()`。
+  安全模式 UI 统一为菜单式的 `ALLaunchGuardSafeModeViewController`，
+  并始终以独立 UIWindow 接管展示；宿主可手动调用
+  `activateSafeModeWindow()`。
 - 原 `fixHandler` 清理逻辑迁移为注册 `ALLaunchGuardFixAction`
   （一行包装示例；`fixActions` 为空时库自动提供内置"重置安全模式"
   兜底动作，不会出现无出口困局）：
@@ -720,21 +694,7 @@ ALLaunchGuard.shared.fixActions = [
 ]
 ```
 
-### 3. 默认展示行为改为独立 UIWindow 接管
-
-1.x 默认在 key window rootVC 上 present；2.0 默认 `.dedicatedWindow`
-（独立 UIWindow 接管）。需要旧行为的宿主显式配置：
-
-```swift
-ALLaunchGuard.shared.uiConfig.presentationStyle = .presentOnRoot
-```
-
-注意 `.presentOnRoot` **仅回退挂载方式**（在宿主 key window rootVC 上
-present，要求宿主已构建自身界面）——展示的页面仍是 2.0 菜单式
-`ALLaunchGuardSafeModeViewController`，而不是 1.x 单按钮页；依赖 1.x
-`fixHandler` 清理逻辑的宿主必须按第 5 节迁移为 `ALLaunchGuardFixAction`。
-
-### 4. `start()` 返回值成为门控核心 + 5 秒自动清零语义
+### 3. `start()` 返回值成为门控核心 + 5 秒自动清零语义
 
 - 1.x：`start()` 仅为 Void 启动，宿主自行判断；2.0：`start()` 返回
   `Bool`，返回 `true` 时**必须跳过全部启动任务**（门控范式见 Quick Start）。

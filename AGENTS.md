@@ -4,7 +4,7 @@
 
 ## 项目概述
 
-ALLaunchGuard 是一个 iOS 启动安全模式库（Swift 5.0+ / iOS 14.0+）：通过持久化的连续启动崩溃计数（默认阈值 3）检测崩溃循环，达到阈值后进入安全模式并弹出可选的内置修复页面，帮助用户恢复应用。
+ALLaunchGuard 是一个 iOS 启动安全模式库（Swift 5.0+ / iOS 15.0+）：通过持久化的连续启动崩溃计数（默认阈值 3）检测崩溃循环，达到阈值后进入安全模式并弹出可选的内置修复页面，帮助用户恢复应用。
 
 - 源码：`Sources/ALLaunchGuard/`（单 target，无第三方运行时依赖）
 - 测试：`Tests/ALLaunchGuardTests/`
