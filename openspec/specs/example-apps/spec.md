@@ -52,4 +52,4 @@ README SHALL 重写以反映 2.0 行为：打点法判定语义、didFinishLaunc
 
 #### Scenario: README 与实现一致
 - **WHEN** 阅读 README 的接入示例代码
-- **THEN** 与当前公共 API 完全一致（start() 返回值、fixActions、presentationStyle 等），无已废弃字段的用法残留
+- **THEN** 与当前公共 API 完全一致（start() 返回值、fixActions、独立 UIWindow 接管等），无已废弃字段的用法残留

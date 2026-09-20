@@ -20,7 +20,7 @@ import UIKit
 /// 正常流程——修复流程本身 MUST NOT 自动关闭页面、MUST NOT 自动调用
 /// exit（spec: safe-mode-ui MODIFIED）。
 ///
-/// 全部使用 iOS 14 安全 API（spec: safe-mode-ui / design D2、D3、D6）。
+/// 以 iOS 15 为最低 API 基线（spec: safe-mode-ui）。
 public final class ALLaunchGuardSafeModeViewController: UIViewController {
 
     // MARK: - 动作项状态机（design D2）
@@ -117,7 +117,7 @@ public final class ALLaunchGuardSafeModeViewController: UIViewController {
     /// “重启应用”按钮（design D1）：初始隐藏，任一动作修复成功且
     /// `config.allowRestartExit == true` 时展示；点击后经系统 Alert
     /// 二次确认才 exit(0)（避免误触杀进程）。
-    /// iOS 14 安全 API：系统 UIButton + layer.cornerRadius。
+    /// 使用系统 UIButton 与 layer.cornerRadius。
     private lazy var restartButton: UIButton = {
         let b = UIButton(type: .system)
         b.setTitle(config.restartButtonTitle, for: .normal)

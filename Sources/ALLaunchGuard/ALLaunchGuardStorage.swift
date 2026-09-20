@@ -16,28 +16,6 @@ public protocol ALLaunchGuardStorage: AnyObject {
     var safeModeActive: Bool { get set }
 }
 
-// MARK: - 协议扩展默认实现（向后兼容）
-
-/// 为新增的三个持久化需求提供 no-op 默认实现：
-/// 读取返回 nil / false，写入被忽略。
-/// 既有第三方存储实现零改动即可编译，判定降级为纯计数模式。
-public extension ALLaunchGuardStorage {
-    var lastLaunchMarkUptime: TimeInterval? {
-        get { nil }
-        set { /* no-op：不支持持久化时无重启防护（降级语义） */ }
-    }
-
-    var lastLaunchDiedInBackground: Bool {
-        get { false }
-        set { /* no-op：不支持持久化时无后台死亡防护（降级语义） */ }
-    }
-
-    var safeModeActive: Bool {
-        get { false }
-        set { /* no-op：不支持持久化时无粘滞安全模式（降级语义） */ }
-    }
-}
-
 /// Default `UserDefaults`-backed implementation of `ALLaunchGuardStorage`.
 public final class UserDefaultsLaunchGuardStorage: ALLaunchGuardStorage {
 

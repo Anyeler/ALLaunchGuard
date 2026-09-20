@@ -41,8 +41,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         //    Scene 生命周期下 didFinishLaunching 返回后 scene 仍会连接，
         //    SceneDelegate.willConnectTo 以 isInSafeMode 短路（不构建
         //    window/首页）；安全模式页面由库以独立 UIWindow 自动接管展示
-        //    （uiConfig.presentationStyle 默认 .dedicatedWindow，库经
-        //    willConnect 观察者以 UIWindow(windowScene:) 挂载）。
+        //    （库经 willConnect 观察者以 UIWindow(windowScene:) 挂载）。
         //    正常启动路径的 window 构建与首页展示已迁入 SceneDelegate。
         if ALLaunchGuard.shared.start() {
             #if DEBUG

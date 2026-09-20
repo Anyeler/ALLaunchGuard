@@ -38,8 +38,7 @@ import UIKit
 /// 仍处于"本次启动跳过了一切"的状态，关窗会黑屏；等待用户手动重启是唯一
 /// 正确语义。协调器由 `ALLaunchGuard` 持有单实例（见其声明处取舍说明）。
 ///
-/// 全部使用 iOS 14 安全 API（UIScene.willConnectNotification（iOS 13+）、
-/// UIWindowScene 常规 API，spec: iOS 14 兼容）。
+/// 以 iOS 15 为最低 API 基线（spec: safe-mode-window）。
 ///
 /// 注：spec/design 原文写作 "UIScene.didConnectNotification"——UIKit 中
 /// 不存在该常量（didConnect 系 UIScreen 的通知），scene 连接通知的实际

@@ -10,12 +10,6 @@ final class MockStorage: ALLaunchGuardStorage {
     var safeModeActive = false
 }
 
-// MARK: - 仅实现旧协议的存储（验证 protocol extension 默认实现的向后兼容）
-
-final class LegacyStorage: ALLaunchGuardStorage {
-    var consecutiveCrashCount: Int = 0
-}
-
 // MARK: - Fake schedulers（存活计时注入）
 
 /// 立即执行调度器：模拟存活计时立即到期（进程存活满阈值时长）
@@ -199,75 +193,22 @@ final class ALLaunchGuardTests: XCTestCase {
         XCTAssertFalse(guard_.uiConfig.autoPresent)
     }
 
-    // MARK: 展示样式与自动展示分流（tasks 1.1，spec: safe-mode-window）
+    // MARK: 自动展示分流（spec: safe-mode-window）
 
-    /// presentationStyle 默认 .dedicatedWindow（独立窗口接管，BREAKING 2.0.0）
-    func testConfigPresentationStyleDefaultsToDedicatedWindow() {
-        XCTAssertEqual(ALLaunchGuardConfig().presentationStyle, .dedicatedWindow)
-        XCTAssertEqual(ALLaunchGuardConfig.default.presentationStyle, .dedicatedWindow)
-    }
-
-    /// 自定义 .presentOnRoot：构造参数注入与事后赋值均生效（兼容旧行为）
-    func testConfigPresentationStyleCustomPresentOnRoot() {
-        let custom = ALLaunchGuardConfig(presentationStyle: .presentOnRoot)
-        XCTAssertEqual(custom.presentationStyle, .presentOnRoot)
-
-        var mutated = ALLaunchGuardConfig()
-        mutated.presentationStyle = .presentOnRoot
-        XCTAssertEqual(mutated.presentationStyle, .presentOnRoot)
-    }
-
-    /// 分流纯函数表驱动：autoPresent × presentationStyle → 期望展示路径
-    func testPresentationRouteTableDriven() {
-        let cases: [
-            (autoPresent: Bool,
-             style: ALLaunchGuardPresentationStyle,
-             expected: ALLaunchGuardPresentationRoute)
-        ] = [
-            // autoPresent 为真：按 presentationStyle 分流
-            (true,  .dedicatedWindow, .dedicatedWindow),   // 默认：独立窗口接管
-            (true,  .presentOnRoot,   .presentOnRoot),     // 兼容旧 present 路径
-            // autoPresent 为假：不自动展示，与样式无关
-            (false, .dedicatedWindow, .none),
-            (false, .presentOnRoot,   .none),
+    /// 自动展示唯一采用独立窗口；关闭自动展示时不安装 UI。
+    func testPresentationRouteUsesDedicatedWindowOnly() {
+        let cases: [(autoPresent: Bool, expected: ALLaunchGuardPresentationRoute)] = [
+            (true, .dedicatedWindow),
+            (false, .none),
         ]
         for testCase in cases {
-            let config = ALLaunchGuardConfig(
-                autoPresent: testCase.autoPresent,
-                presentationStyle: testCase.style
-            )
+            let config = ALLaunchGuardConfig(autoPresent: testCase.autoPresent)
             XCTAssertEqual(
                 ALLaunchGuard.presentationRoute(for: config),
                 testCase.expected,
-                "autoPresent=\(testCase.autoPresent), style=\(testCase.style)"
+                "autoPresent=\(testCase.autoPresent)"
             )
         }
-    }
-
-    // MARK: 存储协议扩展向后兼容（tasks 1.3）
-
-    func testLegacyStorageUsesNoOpDefaultsAndDegradesToPureCounting() {
-        let storage = LegacyStorage()
-
-        // 默认实现：读取返回 nil / false
-        XCTAssertNil(storage.lastLaunchMarkUptime)
-        XCTAssertFalse(storage.lastLaunchDiedInBackground)
-        XCTAssertFalse(storage.safeModeActive)
-
-        // 默认实现：写入被忽略
-        storage.lastLaunchMarkUptime = 123
-        storage.lastLaunchDiedInBackground = true
-        storage.safeModeActive = true
-        XCTAssertNil(storage.lastLaunchMarkUptime)
-        XCTAssertFalse(storage.lastLaunchDiedInBackground)
-        XCTAssertFalse(storage.safeModeActive)
-
-        // 降级为纯计数模式：计数仍递增，达阈值仍进安全模式，不崩溃
-        storage.consecutiveCrashCount = 2
-        let guard_ = ALLaunchGuard(storage: storage, crashThreshold: 3)
-        guard_.start()
-        XCTAssertTrue(guard_.isInSafeMode)
-        XCTAssertEqual(storage.consecutiveCrashCount, 3)
     }
 
     func testUserDefaultsStorageRoundTripsNewFields() {

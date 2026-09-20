@@ -2,7 +2,7 @@
 
 ## Purpose
 
-定义安全模式菜单式修复页的 UI 行为契约：以可扩展动作列表（fixActions 数据源）呈现修复能力，用户点击单项才执行并得到明确的执行状态反馈，修复完成后获得重启提示；页面配置化（文案/颜色/提示语）且兼容 iOS 14。
+定义安全模式菜单式修复页的 UI 行为契约：以可扩展动作列表（fixActions 数据源）呈现修复能力，用户点击单项才执行并得到明确的执行状态反馈，修复完成后获得重启提示；页面配置化（文案/颜色/提示语）且以 iOS 15 为最低支持版本。
 
 ## Requirements
 ### Requirement: 动作菜单列表展示
@@ -62,9 +62,9 @@
 - **THEN** 页面底部展示该自定义文案
 
 
-### Requirement: iOS 14 兼容
-新页面全部 UI 代码 MUST 仅使用 iOS 14 可用 API（如 UIButton(type:)、UITableView 常规 API），并 SHALL 通过 iOS destination 编译验证。
+### Requirement: iOS 15 UI 基线
+安全模式页面的 UIKit 代码 MUST 以 iOS 15 为最低可用版本，并 SHALL 通过 iOS 15 deployment target 编译验证。
 
-#### Scenario: iOS 14 编译
-- **WHEN** 以 iOS 14 deployment target 编译库的 UIKit 分支
+#### Scenario: iOS 15 编译
+- **WHEN** 以 iOS 15 deployment target 编译库的 UIKit 分支
 - **THEN** 编译通过，无 availability 错误

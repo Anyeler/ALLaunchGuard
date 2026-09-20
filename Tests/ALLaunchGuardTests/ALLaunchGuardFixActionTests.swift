@@ -3,27 +3,17 @@ import XCTest
 
 // MARK: - 可控 mock 动作
 
-/// 可控修复动作：预设成败结果、记录 perform 调用次数；
-/// 故意不实现 isDestructive——顺带验证协议扩展默认值 false。
+/// 可控修复动作：预设成败结果、记录 perform 调用次数。
 final class MockFixAction: ALLaunchGuardFixAction {
     let title: String = "Mock 修复动作"
     let iconSystemName: String? = "wrench"
+    let isDestructive = false
     var result: Bool = true
     private(set) var performCount = 0
 
     func perform(completion: @escaping (Bool) -> Void) {
         performCount += 1
         completion(result)
-    }
-}
-
-// MARK: - 仅实现既有回调的委托（验证新回调默认实现的向后兼容）
-
-final class LegacyDelegate: ALLaunchGuardDelegate {
-    var enteredSafeMode = false
-
-    func launchGuardDidEnterSafeMode(_ guard: ALLaunchGuard) {
-        enteredSafeMode = true
     }
 }
 
@@ -80,7 +70,7 @@ final class ALLaunchGuardFixActionTests: XCTestCase {
         XCTAssertTrue(guard_.fixActions[2] === third)
     }
 
-    // MARK: 动作元数据与协议默认值（spec: 修复动作协议契约）
+    // MARK: 动作元数据（spec: 修复动作协议契约）
 
     /// 自定义动作元数据完整可读；ClosureAction 默认 iconSystemName 为 nil
     func testActionMetadataReadable() {
@@ -96,9 +86,8 @@ final class ALLaunchGuardFixActionTests: XCTestCase {
         XCTAssertNil(ALLaunchGuardClosureAction(title: "无图标") { _ in }.iconSystemName)
     }
 
-    /// 未实现 isDestructive 的动作读取协议扩展默认值 false；显式指定时透传
+    /// 内置和闭包动作的破坏性标记按配置暴露。
     func testIsDestructiveDefaultsToFalseAndPassesThrough() {
-        XCTAssertFalse((MockFixAction() as ALLaunchGuardFixAction).isDestructive)
         XCTAssertFalse((ALLaunchGuardClearCacheAction() as ALLaunchGuardFixAction).isDestructive)
 
         XCTAssertTrue(
@@ -327,26 +316,6 @@ final class ALLaunchGuardFixActionTests: XCTestCase {
         XCTAssertFalse(guard_.isInSafeMode)
         XCTAssertFalse(storage.safeModeActive)
         XCTAssertEqual(delegate.exitCount, 1)
-    }
-
-    // MARK: 委托完成回调（spec: 委托完成回调）
-
-    /// 既有委托实现者零改动：只实现进入回调也能编译，didFinish 走默认空实现
-    func testLegacyDelegateUnaffectedByNewCallback() {
-        let storage = MockStorage()
-        storage.consecutiveCrashCount = 2
-        let delegate = LegacyDelegate()
-        let guard_ = ALLaunchGuard(storage: storage, crashThreshold: 3)
-        guard_.delegate = delegate
-        guard_.survivalScheduler = noOpScheduler
-        XCTAssertTrue(guard_.start())
-        XCTAssertTrue(delegate.enteredSafeMode)
-
-        // 默认空实现：不崩溃，既有回调不受影响
-        let exp = expectation(description: "legacy delegate completion")
-        guard_.perform(MockFixAction()) { _ in exp.fulfill() }
-        wait(for: [exp], timeout: 2)
-        XCTAssertFalse(guard_.isInSafeMode)
     }
 
     // MARK: 内置清缓存动作（spec: 内置清缓存动作）
